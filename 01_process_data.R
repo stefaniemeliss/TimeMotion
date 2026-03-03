@@ -1,9 +1,12 @@
+options(scipen=999)
+#### SETUPS ####
 
+# List all setup files
+tmp = list.files(path = "..", pattern = "setup.R", recursive = T, full.names = T)
+tmp <- tmp[grepl("TimeMotion", tmp)]
 
-
-
-list.files(path = dir_data_in)
-
+# Source code
+source(file = tmp)
 
 library(xlsx)
 
@@ -22,6 +25,7 @@ obs_index <- xlsx::read.xlsx(file = file.path(dir_data_in, file_name), sheetInde
 
 # only use real observations
 obs_index <- obs_index[obs_index$Type == "real", ]
+gc()
 
 # change column names
 names(obs_index)[names(obs_index) == "NA."] <- "Pseudonym"
@@ -40,6 +44,7 @@ indiv <- xlsx::read.xlsx(file = file.path(dir_data_in, file_name), sheetIndex = 
 
 # only use real observations
 indiv <- indiv[indiv$Obs_Id %in% obs_ids, ]
+gc()
 
 # INTERACTIONS DATA #
 
@@ -56,6 +61,7 @@ loc <- xlsx::read.xlsx(file = file.path(dir_data_in, file_name), sheetIndex = 4)
 
 # only use real observations
 loc <- loc[loc$Obs_Id %in% obs_ids, ]
+gc()
 
 # TIME ESTIMATE DATA #
 
@@ -64,6 +70,7 @@ est <- xlsx::read.xlsx(file = file.path(dir_data_in, file_name), sheetIndex = 5)
 
 # only use real observations
 est <- est[est$Pseudonym %in% pseudo, ]
+gc()
 
 # EVENING WORK ESTIMATE DATA #
 
@@ -72,6 +79,7 @@ eve <- xlsx::read.xlsx(file = file.path(dir_data_in, file_name), sheetIndex = 6)
 
 # only use real observations
 eve <- eve[eve$Pseudonym %in% pseudo, ]
+gc()
 
 # SCHOOL DAY TIMES #
 
@@ -80,4 +88,5 @@ sch <- xlsx::read.xlsx(file = file.path(dir_data_in, file_name), sheetIndex = 7)
 
 # only use real observations
 sch <- sch[sch$Pseudonym %in% pseudo, ]
+gc()
 
