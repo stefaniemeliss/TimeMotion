@@ -21,6 +21,7 @@ clean_items <- function(x) {
   x <- gsub("Parent and carer", "Parent or carer", x)
   x <- gsub(" (please state)", "", x)
   x <- gsub("a colleague", "colleague(s)", x)
+  x <- gsub("stakeholders", "stakeholder(s)", x)
   x
 }
 
