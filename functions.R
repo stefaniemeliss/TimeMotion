@@ -120,3 +120,76 @@ parse_duration_to_minutes <- function(x) {
     
   }, USE.NAMES = FALSE)
 }
+
+
+
+
+aggregate_obs <- function(
+    data,
+    primary_group_vars,
+    secondary_group_vars,
+    factor_levels = NULL,
+    id_vars = "Pseudonym",
+    duration_var = "Duration_Seconds"
+) {
+  # Main summarisation by primary and secondary group
+  tmp <- data %>%
+    group_by(across(all_of(c(primary_group_vars, id_vars, secondary_group_vars))), .drop = FALSE) %>%
+    summarise(
+      count = n(),
+      mins = sum(.data[[duration_var]], na.rm = TRUE) / 60,
+      .groups = "drop"
+    ) %>%
+    group_by(across(all_of(c(primary_group_vars, secondary_group_vars))), .drop = FALSE) %>%
+    summarise(
+      across(
+        .cols = c(count, mins),
+        .fns = list(
+          mean = ~mean(.x, na.rm = TRUE),
+          sd = ~sd(.x, na.rm = TRUE),
+          min = ~min(.x, na.rm = TRUE),
+          max = ~max(.x, na.rm = TRUE),
+          SE = ~sd(.x, na.rm = TRUE) / sqrt(sum(!is.na(.x)))
+        ),
+        .names = "{.fn}_{.col}"
+      ),
+      .groups = "drop"
+    )
+  
+  # Whole sample summarisation by secondary group only
+  tmp_whole <- data %>%
+    group_by(across(all_of(c(id_vars, secondary_group_vars))), .drop = FALSE) %>%
+    summarise(
+      count = n(),
+      mins = sum(.data[[duration_var]], na.rm = TRUE) / 60,
+      .groups = "drop"
+    ) %>%
+    group_by(across(all_of(secondary_group_vars)), .drop = FALSE) %>%
+    summarise(
+      across(
+        .cols = c(count, mins),
+        .fns = list(
+          mean = ~mean(.x, na.rm = TRUE),
+          sd = ~sd(.x, na.rm = TRUE),
+          min = ~min(.x, na.rm = TRUE),
+          max = ~max(.x, na.rm = TRUE),
+          SE = ~sd(.x, na.rm = TRUE) / sqrt(sum(!is.na(.x)))
+        ),
+        .names = "{.fn}_{.col}"
+      ),
+      .groups = "drop"
+    )
+  
+  # Add a column for the primary group, set to "Whole sample"
+  tmp_whole[[primary_group_vars[1]]] <- "Whole sample"
+  
+  # Combine and set factor levels if provided
+  result <- bind_rows(tmp, tmp_whole) %>%
+    mutate(across(where(is.numeric), ~ifelse(mean_count == 0, NA, .)))
+  
+  if (!is.null(factor_levels)) {
+    result[[primary_group_vars[1]]] <- factor(result[[primary_group_vars[1]]], levels = factor_levels)
+  }
+  
+  return(result)
+}
