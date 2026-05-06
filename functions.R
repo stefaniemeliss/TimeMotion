@@ -139,7 +139,7 @@ aggregate_obs <- function(
       count = n(),
       mins = sum(.data[[duration_var]], na.rm = TRUE) / 60,
       .groups = "drop"
-    ) %>%
+    ) %>% 
     group_by(across(all_of(c(primary_group_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
       across(
@@ -185,7 +185,13 @@ aggregate_obs <- function(
   
   # Combine and set factor levels if provided
   result <- bind_rows(tmp, tmp_whole) %>%
-    mutate(across(where(is.numeric), ~ifelse(mean_count == 0, NA, .)))
+    mutate(across(where(is.numeric) & !mean_mins, ~ifelse(mean_count == 0, NA, .))) %>%
+    tidyr::complete(
+      tidyr::nesting(!!!syms(primary_group_vars)),
+      tidyr::nesting(!!!syms(secondary_group_vars)),
+      fill = list(count = 0, mins = 0)
+    )
+    
   
   if (!is.null(factor_levels)) {
     result[[primary_group_vars[1]]] <- factor(result[[primary_group_vars[1]]], levels = factor_levels)
