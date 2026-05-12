@@ -195,7 +195,11 @@ aggregate_obs <- function(
   tmp_whole[[primary_group_vars[1]]] <- "Whole sample"
   
   # Combine and set factor levels if provided
-  result <- bind_rows(tmp, tmp_whole) 
+  result <- bind_rows(tmp, tmp_whole) %>%
+    mutate(
+      SE_count = if_else(mean_count == 0, NA, SE_count),
+      SE_mins = if_else(mean_mins == 0, NA, SE_mins)
+      )
   if (!is.null(factor_levels)) {
     result[[primary_group_vars[1]]] <- factor(result[[primary_group_vars[1]]], levels = factor_levels)
   }
