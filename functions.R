@@ -139,7 +139,13 @@ aggregate_obs <- function(
       count = n(),
       mins = sum(.data[[duration_var]], na.rm = TRUE) / 60,
       .groups = "drop"
+    )  %>%
+    tidyr::complete(
+      tidyr::nesting(!!!syms(id_vars)),
+      tidyr::nesting(!!!syms(secondary_group_vars)),
+      fill = list(count = 0, mins = 0)
     ) %>% 
+    mutate(Phase = if_else(grepl("PST", Pseudonym), "Primary", "Secondary")) %>%
     group_by(across(all_of(c(primary_group_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
       across(
@@ -164,6 +170,11 @@ aggregate_obs <- function(
       mins = sum(.data[[duration_var]], na.rm = TRUE) / 60,
       .groups = "drop"
     ) %>%
+    tidyr::complete(
+      tidyr::nesting(!!!syms(id_vars)),
+      tidyr::nesting(!!!syms(secondary_group_vars)),
+      fill = list(count = 0, mins = 0)
+    ) %>% 
     group_by(across(all_of(secondary_group_vars)), .drop = FALSE) %>%
     summarise(
       across(
@@ -184,15 +195,7 @@ aggregate_obs <- function(
   tmp_whole[[primary_group_vars[1]]] <- "Whole sample"
   
   # Combine and set factor levels if provided
-  result <- bind_rows(tmp, tmp_whole) %>%
-    mutate(across(where(is.numeric) & !mean_mins, ~ifelse(mean_count == 0, NA, .))) %>%
-    tidyr::complete(
-      tidyr::nesting(!!!syms(primary_group_vars)),
-      tidyr::nesting(!!!syms(secondary_group_vars)),
-      fill = list(count = 0, mins = 0)
-    )
-    
-  
+  result <- bind_rows(tmp, tmp_whole) 
   if (!is.null(factor_levels)) {
     result[[primary_group_vars[1]]] <- factor(result[[primary_group_vars[1]]], levels = factor_levels)
   }
