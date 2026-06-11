@@ -206,3 +206,13 @@ aggregate_obs <- function(
   
   return(result)
 }
+
+
+# Function to compute overlap between two intervals
+compute_overlap <- function(start1, end1, start2, end2) {
+  overlap_start <- pmax(start1, start2)
+  overlap_end <- pmin(end1, end2)
+  overlap <- as.numeric(difftime(overlap_end, overlap_start, units = "secs"))
+  #if (overlap > 0) overlap else 0
+  return(overlap)
+}
