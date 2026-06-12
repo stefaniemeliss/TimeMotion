@@ -204,6 +204,8 @@ aggregate_obs <- function(
     result[[primary_group_vars[1]]] <- factor(result[[primary_group_vars[1]]], levels = factor_levels)
   }
   
+  result <- as.data.frame(result)
+  
   return(result)
 }
 
