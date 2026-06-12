@@ -130,26 +130,27 @@ aggregate_obs <- function(
     secondary_group_vars,
     factor_levels = NULL,
     id_vars = "Pseudonym",
-    duration_var = "time_dur_s"
+    duration_var = "time_dur_s",
+    duration_unit = "seconds"
 ) {
   # Main summarisation by primary and secondary group
   tmp <- data %>%
     group_by(across(all_of(c(primary_group_vars, id_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
       count = n(),
-      mins = sum(.data[[duration_var]], na.rm = TRUE) / 60,
+      dur = sum(.data[[duration_var]], na.rm = TRUE) / 60,
       .groups = "drop"
     )  %>%
     tidyr::complete(
       tidyr::nesting(!!!syms(id_vars)),
       tidyr::nesting(!!!syms(secondary_group_vars)),
-      fill = list(count = 0, mins = 0)
+      fill = list(count = 0, dur = 0)
     ) %>% 
     mutate(Phase = if_else(grepl("PST", Pseudonym), "Primary", "Secondary")) %>%
     group_by(across(all_of(c(primary_group_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
       across(
-        .cols = c(count, mins),
+        .cols = c(count, dur),
         .fns = list(
           mean = ~mean(.x, na.rm = TRUE),
           sd = ~sd(.x, na.rm = TRUE),
@@ -167,18 +168,18 @@ aggregate_obs <- function(
     group_by(across(all_of(c(id_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
       count = n(),
-      mins = sum(.data[[duration_var]], na.rm = TRUE) / 60,
+      dur = sum(.data[[duration_var]], na.rm = TRUE) / 60,
       .groups = "drop"
     ) %>%
     tidyr::complete(
       tidyr::nesting(!!!syms(id_vars)),
       tidyr::nesting(!!!syms(secondary_group_vars)),
-      fill = list(count = 0, mins = 0)
+      fill = list(count = 0, dur = 0)
     ) %>% 
     group_by(across(all_of(secondary_group_vars)), .drop = FALSE) %>%
     summarise(
       across(
-        .cols = c(count, mins),
+        .cols = c(count, dur),
         .fns = list(
           mean = ~mean(.x, na.rm = TRUE),
           sd = ~sd(.x, na.rm = TRUE),
@@ -198,13 +199,21 @@ aggregate_obs <- function(
   result <- bind_rows(tmp, tmp_whole) %>%
     mutate(
       SE_count = if_else(mean_count == 0, NA, SE_count),
-      SE_mins = if_else(mean_mins == 0, NA, SE_mins)
+      SE_dur = if_else(mean_dur == 0, NA, SE_dur)
       )
   if (!is.null(factor_levels)) {
     result[[primary_group_vars[1]]] <- factor(result[[primary_group_vars[1]]], levels = factor_levels)
   }
   
   result <- as.data.frame(result)
+  
+  # change names depending on unit
+  
+  if(!is.null(duration_unit) & duration_var == "time_dur_s") {
+    names(result) <- gsub("_dur", "_mins", names(result))
+  } else if(!is.null(duration_unit) & duration_var == "time_dur_m") {
+    names(result) <- gsub("_dur", "_hrs", names(result))
+  }
   
   return(result)
 }
