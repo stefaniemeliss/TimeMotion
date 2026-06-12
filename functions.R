@@ -130,7 +130,7 @@ aggregate_obs <- function(
     secondary_group_vars,
     factor_levels = NULL,
     id_vars = "Pseudonym",
-    duration_var = "Duration_Seconds"
+    duration_var = "time_dur_s"
 ) {
   # Main summarisation by primary and secondary group
   tmp <- data %>%
