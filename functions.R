@@ -130,6 +130,7 @@ aggregate_obs <- function(
     secondary_group_vars,
     factor_levels = NULL,
     id_vars = "Pseudonym",
+    obs_id_var = "Id",
     duration_var = "time_dur_s",
     duration_unit = "seconds"
 ) {
@@ -137,7 +138,7 @@ aggregate_obs <- function(
   tmp <- data %>%
     group_by(across(all_of(c(primary_group_vars, id_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
-      count = n(),
+      count = length(unique(.data[[obs_id_var]], na.rm = T)),
       dur = sum(.data[[duration_var]], na.rm = TRUE) / 60,
       .groups = "drop"
     )  %>%
@@ -152,6 +153,8 @@ aggregate_obs <- function(
       across(
         .cols = c(count, dur),
         .fns = list(
+          n = ~n(),
+          n_obs = ~sum(.x > 0, na.rm = TRUE),
           mean = ~mean(.x, na.rm = TRUE),
           sd = ~sd(.x, na.rm = TRUE),
           min = ~min(.x, na.rm = TRUE),
@@ -167,7 +170,7 @@ aggregate_obs <- function(
   tmp_whole <- data %>%
     group_by(across(all_of(c(id_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
-      count = n(),
+      count = length(unique(.data[[obs_id_var]], na.rm = T)),
       dur = sum(.data[[duration_var]], na.rm = TRUE) / 60,
       .groups = "drop"
     ) %>%
@@ -181,6 +184,8 @@ aggregate_obs <- function(
       across(
         .cols = c(count, dur),
         .fns = list(
+          n = ~n(),
+          n_obs = ~sum(.x > 0, na.rm = TRUE),
           mean = ~mean(.x, na.rm = TRUE),
           sd = ~sd(.x, na.rm = TRUE),
           min = ~min(.x, na.rm = TRUE),
