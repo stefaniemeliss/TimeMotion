@@ -132,10 +132,12 @@ aggregate_obs <- function(
     id_vars = "Pseudonym",
     obs_id_var = "Id",
     duration_var = "time_dur_s",
-    duration_unit = "seconds"
+    duration_unit = "seconds",
+    return_teacher_level = F
 ) {
-  # Main summarisation by primary and secondary group
-  tmp <- data %>%
+  
+  # create teacher-level aggregates
+  agg_teach <- data %>%
     group_by(across(all_of(c(primary_group_vars, id_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
       count = length(unique(.data[[obs_id_var]], na.rm = T)),
@@ -146,7 +148,12 @@ aggregate_obs <- function(
       tidyr::nesting(!!!syms(id_vars)),
       tidyr::nesting(!!!syms(secondary_group_vars)),
       fill = list(count = 0, dur = 0)
-    ) %>% 
+    )
+  
+  if(return_teacher_level) return(agg_teach)
+  
+  # Main summarisation by primary and secondary group
+  tmp_phase <- agg_teach %>% 
     mutate(Phase = if_else(grepl("PST", Pseudonym), "Primary", "Secondary")) %>%
     group_by(across(all_of(c(primary_group_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
@@ -167,18 +174,7 @@ aggregate_obs <- function(
     )
   
   # Whole sample summarisation by secondary group only
-  tmp_whole <- data %>%
-    group_by(across(all_of(c(id_vars, secondary_group_vars))), .drop = FALSE) %>%
-    summarise(
-      count = length(unique(.data[[obs_id_var]], na.rm = T)),
-      dur = sum(.data[[duration_var]], na.rm = TRUE) / 60,
-      .groups = "drop"
-    ) %>%
-    tidyr::complete(
-      tidyr::nesting(!!!syms(id_vars)),
-      tidyr::nesting(!!!syms(secondary_group_vars)),
-      fill = list(count = 0, dur = 0)
-    ) %>% 
+  tmp_whole <- agg_teach %>%
     group_by(across(all_of(secondary_group_vars)), .drop = FALSE) %>%
     summarise(
       across(
@@ -201,11 +197,11 @@ aggregate_obs <- function(
   tmp_whole[[primary_group_vars[1]]] <- "Whole sample"
   
   # Combine and set factor levels if provided
-  result <- bind_rows(tmp, tmp_whole) %>%
+  result <- bind_rows(tmp_phase, tmp_whole) %>%
     mutate(
       SE_count = if_else(mean_count == 0, NA, SE_count),
       SE_dur = if_else(mean_dur == 0, NA, SE_dur)
-      )
+    )
   if (!is.null(factor_levels)) {
     result[[primary_group_vars[1]]] <- factor(result[[primary_group_vars[1]]], levels = factor_levels)
   }
