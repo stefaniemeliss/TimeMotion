@@ -1,0 +1,1496 @@
+---
+title: "Time and motion quantitative analysis - preliminary"
+author: "Stefanie Meliss"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+
+
+source(file = "01_process_data_prelim.R")
+library(kableExtra)
+```
+
+## Sample and data collection information  
+
+
+```{r, results='asis'}
+
+cat("###	Basic demographic/experience information (no. of male/female; years experience)\n\n")
+survey %>% 
+  group_by(gender) %>%
+  summarise(
+    count = n(),
+    percentage = n()/nrow(.)) %>%
+  kable(digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+survey %>% 
+  group_by(age) %>%
+  summarise(
+    count = n(),
+    percentage = n()/nrow(.)) %>%
+  kable(digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+survey %>%
+  group_by(teaching_exp_years) %>%
+  summarise(
+    count = n(),
+    percentage = n()/nrow(.)) %>%
+  kable(digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+cat("### The range of subjects taught if secondary and current year groups taught if primary\n\n")
+survey %>%
+  group_by(year_or_subject) %>%
+  summarise(
+    count = n(),
+    percentage = n()/nrow(.)) %>%
+  kable(digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+cat("### Number of observations per day of the week\n\n")
+
+obs_index %>%
+  mutate(day_of_week = substr(obs_index$Date, 1, 3)) %>%
+  group_by(day_of_week) %>%
+  summarise(
+    count = n(),
+    percentage = n()/nrow(.)) %>%
+  kable(digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+cat("###	Number of observations per month\n\n")
+
+obs_index %>%
+  mutate(month = substr(obs_index$Date, 5, 6)) %>%
+  group_by(month) %>%
+  summarise(
+    count = n(),
+    percentage = n()/nrow(.)) %>%
+  kable(digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+```
+
+## Core descriptive analysis
+
+### Stakeholder interactions
+
+```{r, results='asis'}
+
+# prepare data
+inter <- inter %>%
+  left_join(obs_index %>%
+              select(Obs_Id, Pseudonym, School_name)) %>%
+  left_join(sch %>%
+              select(Pseudonym, School_code, pupil_hours_start, pupil_hours_end)) %>%
+  filter(Name != "None") %>%
+  mutate(
+    time_start = as.POSIXct(Start_Unix, origin = "1970-01-01", tz = "Europe/London"),
+    time_end = time_start + Duration_Seconds,
+    stake_group = if_else(grepl("^A[0-9]", stakeholder), "A. Pupils",
+                          if_else(grepl("^B[0-9]", stakeholder), "B. Colleagues",
+                                  if_else(grepl("^C[0-9]", stakeholder), "C. Parents or other",
+                                          NA))),
+    phase = if_else(grepl("PST", Pseudonym), "Primary",
+                    if_else(grepl("SST", Pseudonym), "Secondary", NA)),
+    stakeholder = factor(stakeholder, levels = lvl_stake),
+    teaching_time_task = if_else(grepl("A2|A5|A6|A10|A11|A12", stakeholder), T, F)
+  )
+
+# stakeholder groups
+tmp <- inter %>%
+  group_by(phase, Pseudonym, stake_group, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, stake_group, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>% bind_rows(., 
+                  inter %>%
+                    group_by(Pseudonym, stake_group, .drop = F) %>%
+                    summarise(total_min = sum(Duration_Seconds)/60) %>%
+                    group_by(stake_group, .drop = F) %>%
+                    summarise(
+                      phase = "Whole sample",
+                      mean = mean(total_min),
+                      SD = sd(total_min),
+                      min = min(total_min),
+                      max = max(total_min),
+                      SE = sd(total_min) / sqrt(n())
+                    )
+  ) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary")))
+
+tmp %>%
+  arrange((phase)) %>%
+  kable(caption = "Stakeholder groups", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+ggplot(data = tmp, aes(x = stake_group, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  ylab("Minutes spent") +
+  xlab("Stakeholder interactions") +
+  theme(aspect.ratio = 4/7)
+
+
+# stakeholder interactions
+tmp <- inter %>%
+  group_by(phase, Pseudonym, stakeholder, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, stakeholder, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>% bind_rows(., 
+                  inter %>%
+                    group_by(Pseudonym, stakeholder, .drop = F) %>%
+                    summarise(total_min = sum(Duration_Seconds)/60) %>%
+                    group_by(stakeholder, .drop = F) %>%
+                    summarise(
+                      phase = "Whole sample",
+                      mean = mean(total_min),
+                      SD = sd(total_min),
+                      min = min(total_min),
+                      max = max(total_min),
+                      SE = sd(total_min) / sqrt(n())
+                    )
+  ) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary")))
+
+tmp %>%
+  arrange(phase) %>%
+  kable(caption = "Stakeholder interactions", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+tmp$label <- stringr::str_sub(tmp$stakeholder, 1, 4)
+tmp$label <- gsub(" ", "", tmp$label)
+tmp$label <- factor(tmp$label, levels = c(paste0("A", 1:12, "."), paste0("B", 1:7, "."), paste0("C", 1:4, ".")))
+
+ggplot(data = tmp[grepl("^A[0-9]", tmp$stakeholder), ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  ylab("Minutes spent") +
+  xlab("Pupil interactions") +
+  theme(aspect.ratio = 4/7)
+
+ggplot(data = tmp[grepl("^B[0-9]", tmp$stakeholder), ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  scale_x_discrete(labels = paste0("B", 1:7, ".")) +
+  ylab("Minutes spent") +
+  xlab("Colleague interactions") +
+  theme(aspect.ratio = 4/7)
+
+ggplot(data = tmp[grepl("^C[0-9]", tmp$stakeholder), ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  scale_x_discrete(labels = paste0("C", 1:4, ".")) +
+  ylab("Minutes spent") +
+  xlab("Other stakeholder interactions") +
+  theme(aspect.ratio = 4/7)
+
+# teaching time tasks
+tmp <- inter %>%
+  filter(teaching_time_task == T) %>%
+  group_by(phase, Pseudonym, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>% bind_rows(., 
+                  inter %>%
+                    filter(teaching_time_task == T) %>%
+                    group_by(Pseudonym, .drop = F) %>%
+                    summarise(total_min = sum(Duration_Seconds)/60) %>%
+                    summarise(
+                      phase = "Whole sample",
+                      mean = mean(total_min),
+                      SD = sd(total_min),
+                      min = min(total_min),
+                      max = max(total_min),
+                      SE = sd(total_min) / sqrt(n())
+                    )
+  ) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary")))
+
+tmp %>%
+  kable(caption = "Teaching time tasks", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+ggplot(data = tmp, aes(x = phase, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  ylab("Minutes spent") +
+  xlab("Teaching time tasks")
+
+```
+
+
+### Individual tasks
+
+```{r, results='asis'}
+
+# prepare data
+indiv <- indiv %>%
+  left_join(obs_index %>%
+              select(Obs_Id, Pseudonym)) %>%
+  left_join(sch %>%
+              select(Pseudonym, School_code, pupil_hours_start, pupil_hours_end)) %>%
+  filter(Name != "None") %>%
+  mutate(
+    time_start = as.POSIXct(Start_Unix, origin = "1970-01-01", tz = "Europe/London"),
+    time_end = time_start + Duration_Seconds,
+    phase = if_else(grepl("PST", Pseudonym), "Primary",
+                    if_else(grepl("SST", Pseudonym), "Secondary", NA)),
+    activity_name = factor(activity_name, levels = lvl_act)
+  )
+
+# activities
+tmp <- indiv %>%
+  group_by(phase, Pseudonym, activity_name, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, activity_name, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>% bind_rows(., 
+                  indiv %>%
+                    group_by(Pseudonym, activity_name, .drop = F) %>%
+                    summarise(total_min = sum(Duration_Seconds)/60) %>%
+                    group_by(activity_name, .drop = F) %>%
+                    summarise(
+                      phase = "Whole sample",
+                      mean = mean(total_min),
+                      SD = sd(total_min),
+                      min = min(total_min),
+                      max = max(total_min),
+                      SE = sd(total_min) / sqrt(n())
+                    )
+  ) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary")))
+
+tmp %>%
+  arrange(phase) %>%
+  kable(caption = "Individual activities", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+tmp$label <- stringr::str_sub(tmp$activity_name, 1, 4)
+
+ggplot(data = tmp[grepl("^D[0-9]", tmp$activity_name), ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  scale_x_discrete(labels = paste0("D", 1:8, ".")) +
+  ylab("Minutes spent") +
+  xlab("Individual work related to pupil learning and pastoral duties")
+
+ggplot(data = tmp[grepl("^E[0-9]", tmp$activity_name), ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  scale_x_discrete(labels = paste0("E", 1:3, ".")) +
+  ylab("Minutes spent") +
+  xlab("Other individual tasks")
+
+ggplot(data = tmp[grepl("^F[0-9]", tmp$activity_name), ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  scale_x_discrete(labels = paste0("F", 1:2, ".")) +
+  ylab("Minutes spent") +
+  xlab("Recreation")
+
+ggplot(data = tmp[grepl("^G[0-9]", tmp$activity_name), ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  scale_x_discrete(labels = paste0("G", 1, ".")) +
+  ylab("Minutes spent") +
+  xlab("Travel")
+
+```
+
+### Location
+
+```{r, results='asis'}
+
+# prepare data
+loco <- loco %>%
+  left_join(obs_index %>%
+              select(Obs_Id, Pseudonym)) %>%
+  left_join(sch %>%
+              select(Pseudonym, School_code, pupil_hours_start, pupil_hours_end)) %>%
+  filter(Name != "None") %>%
+  mutate(
+    phase = if_else(grepl("PST", Pseudonym), "Primary",
+                    if_else(grepl("SST", Pseudonym), "Secondary", NA)),
+    Name = factor(Name, levels = setdiff(lvl_loc, "None")),
+    time_start = as.POSIXct(Start_Unix, origin = "1970-01-01", tz = "Europe/London"),
+    time_end = time_start + Duration_Seconds
+  )
+
+
+tmp <- loco %>%
+  group_by(phase, Pseudonym, Name, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, Name, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>% bind_rows(., 
+                  loco %>%
+                    group_by(Pseudonym, Name, .drop = F) %>%
+                    summarise(total_min = sum(Duration_Seconds)/60) %>%
+                    group_by(Name, .drop = F) %>%
+                    summarise(
+                      phase = "Whole sample",
+                      mean = mean(total_min),
+                      SD = sd(total_min),
+                      min = min(total_min),
+                      max = max(total_min),
+                      SE = sd(total_min) / sqrt(n())
+                    )
+  ) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary"))) %>%
+  mutate(label = stringr::str_wrap(Name, width = 15))
+
+ggplot(data = tmp[as.numeric(tmp$Name) %in% 1:4, ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) + 
+  xlab("Teaching and learning spaces") +
+  ylab("Minutes spent")
+
+ggplot(data = tmp[as.numeric(tmp$Name) %in% 5:9, ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Pastoral and administrative spaces") +
+  ylab("Minutes spent")
+
+ggplot(data = tmp[as.numeric(tmp$Name) %in% 10:11, ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Staff and meeting spaces") +
+  ylab("Minutes spent")
+
+ggplot(data = tmp[as.numeric(tmp$Name) %in% 12:17, ], aes(x = label, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Shared and communal spaces") +
+  ylab("Minutes spent")
+
+```
+
+
+
+## School-level summaries
+
+### Stakeholder interactions
+
+```{r, results='asis'}
+
+inter %>% 
+  group_by(School_code, School_name) %>%
+  summarise(Pseudonym = unique(Pseudonym)) %>%
+  kable(caption = "Mapping between school codes, names and pseudonyms", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# stakeholder groups
+tmp <- inter %>%
+  group_by(School_code, phase, Pseudonym, stake_group, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, School_code, stake_group, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  )
+
+tmp %>%
+  arrange(phase, School_code) %>%
+  kable(caption = "Stakeholder groups", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+ggplot(data = tmp, aes(x = stake_group, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  ylab("Minutes spent") +
+  xlab("Stakeholder interactions")
+
+
+# stakeholder interactions
+tmp <- inter %>%
+  group_by(phase, School_code, Pseudonym, stakeholder, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, School_code, stakeholder, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  )
+
+tmp %>%
+  arrange(phase, School_code) %>%
+  kable(caption = "Stakeholder interactions", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+tmp$label <- stringr::str_sub(tmp$stakeholder, 1, 4)
+tmp$label <- gsub(" ", "", tmp$label)
+tmp$label <- factor(tmp$label, levels = c(paste0("A", 1:12, "."), paste0("B", 1:7, "."), paste0("C", 1:4, ".")))
+
+ggplot(data = tmp[grepl("^A[0-9]", tmp$stakeholder), ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  ylab("Minutes spent") +
+  xlab("Pupil interactions")
+
+ggplot(data = tmp[grepl("^B[0-9]", tmp$stakeholder), ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  scale_x_discrete(labels = paste0("B", 1:7, ".")) +
+  ylab("Minutes spent") +
+  xlab("Colleague interactions")
+
+ggplot(data = tmp[grepl("^C[0-9]", tmp$stakeholder), ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  scale_x_discrete(labels = paste0("C", 1:4, ".")) +
+  ylab("Minutes spent") +
+  xlab("Other stakeholder interactions")
+
+# teaching time tasks
+tmp <- inter %>%
+  filter(teaching_time_task == T) %>%
+  group_by(phase, School_code, Pseudonym, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, School_code, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  )
+
+tmp %>%
+  kable(caption = "Teaching time tasks", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+ggplot(data = tmp, aes(x = School_code, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  ylab("Minutes spent") +
+  xlab("Teaching time tasks")
+
+```
+
+### Individual tasks
+
+```{r, results='asis'}
+
+# activities
+tmp <- indiv %>%
+  group_by(phase, School_code, Pseudonym, activity_name, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, School_code, activity_name, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  )
+
+tmp %>%
+  arrange(phase, School_code) %>%
+  kable(caption = "Individual activities", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+tmp$label <- stringr::str_sub(tmp$activity_name, 1, 4)
+
+ggplot(data = tmp[grepl("^D[0-9]", tmp$activity_name), ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  scale_x_discrete(labels = paste0("D", 1:8, ".")) +
+  ylab("Minutes spent") +
+  xlab("Individual work related to pupil learning and pastoral duties")
+
+ggplot(data = tmp[grepl("^E[0-9]", tmp$activity_name), ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  scale_x_discrete(labels = paste0("E", 1:3, ".")) +
+  ylab("Minutes spent") +
+  xlab("Other individual tasks")
+
+ggplot(data = tmp[grepl("^F[0-9]", tmp$activity_name), ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  scale_x_discrete(labels = paste0("F", 1:2, ".")) +
+  ylab("Minutes spent") +
+  xlab("Recreation")
+
+ggplot(data = tmp[grepl("^G[0-9]", tmp$activity_name), ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  scale_x_discrete(labels = paste0("G", 1, ".")) +
+  ylab("Minutes spent") +
+  xlab("Travel")
+
+```
+
+### Location
+
+```{r, results='asis'}
+
+tmp <- loco %>%
+  group_by(phase, School_code, Pseudonym, Name, .drop = F) %>%
+  summarise(total_min = sum(Duration_Seconds)/60) %>%
+  group_by(phase, School_code, Name, .drop = F) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>% 
+  mutate(label = stringr::str_wrap(Name, width = 15))
+
+tmp %>%
+  arrange(phase, School_code) %>%
+  kable(caption = "Location", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+
+ggplot(data = tmp[as.numeric(tmp$Name) %in% 1:4, ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  xlab("Teaching and learning spaces") +
+  ylab("Minutes spent")
+
+ggplot(data = tmp[as.numeric(tmp$Name) %in% 5:9, ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  xlab("Pastoral and administrative spaces") +
+  ylab("Minutes spent")
+
+ggplot(data = tmp[as.numeric(tmp$Name) %in% 10:11, ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  xlab("Staff and meeting spaces") +
+  ylab("Minutes spent")
+
+ggplot(data = tmp[as.numeric(tmp$Name) %in% 12:17, ], aes(x = label, y = mean, fill = School_code)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  scale_fill_manual(values = c(coral, teal, purple, orange, cyan, yellow)) +
+  xlab("Shared and communal spaces") +
+  ylab("Minutes spent")
+
+```
+
+
+## Estimated vs. observed time
+
+```{r, fig.width=7, fig.height=12, results='asis'}
+# add codes for survey items
+data <- bind_rows(inter, indiv) %>%
+  # combine variable levels for individual and stakeholder tasks
+  mutate(
+    task_description = case_when(
+      !is.na(stakeholder) & !is.na(activity_name) ~ paste(stakeholder, activity_name),
+      !is.na(stakeholder) ~ stakeholder,
+      !is.na(activity_name) ~ activity_name,
+      TRUE ~ NA_character_
+    )) %>%
+  # extract code
+  mutate(task_code = stringr::str_extract(task_description, "^[A-G][0-9]+"))  %>%
+  # add mapping to survey
+  left_join(survey_task_mapping, by = "task_code") %>%
+  filter(!is.na(survey_item)) %>%
+  group_by(phase, School_code, Pseudonym, survey_item) %>%
+  summarise(
+    observed = sum(Duration_Seconds)/60
+  )
+
+# select estimate columns
+est <- survey[, c("Pseudonym", "School_code", "phase", time_cols)] 
+
+# fix data for the one ppt who estimated for a week rather than a day
+est[est$Pseudonym == "SST1", time_cols] <- est[est$Pseudonym == "SST1", time_cols]/5
+
+data <- tidyr::pivot_longer(
+  data = est,
+  cols = time_cols,
+  names_to = "survey_item",
+  values_to = "estimated"
+) %>%
+  full_join(., data) %>%
+  # filter(Pseudonym != "SST1") %>%
+  mutate(
+    observed = if_else(is.na(observed), 0, observed),
+    difference = estimated - observed,
+    survey_item = gsub("_time", "", survey_item))
+
+# convert to long format to plot individual data
+tmp <- tidyr::pivot_longer(
+  data = data,
+  cols = c("observed", "estimated"),
+  names_to = "measure",
+  values_to = "total_mins"
+) %>%
+  mutate(Pseudonym = factor(Pseudonym))
+
+# plot individual data
+ggplot(data = tmp, aes(x = survey_item, y = total_mins, colour = measure)) +
+  geom_point(position = position_dodge(0.5)) +
+  scale_color_manual(values = c(coral, teal)) +
+  facet_wrap(vars(Pseudonym), ncol = 2, dir = "v") +
+  ambition_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  ylab("Minutes spent") +
+  xlab("Task")
+
+# spaghetti plot to identify trends by measure
+ggplot(data = tmp, aes(x = measure, y = total_mins, group = Pseudonym, col = phase, shape = phase)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values = c(blue, red)) +
+  facet_wrap(vars(survey_item), ncol = 3, dir = "h") +
+  ambition_theme +
+  ylab("Minutes spent") +
+  xlab("Measure")
+
+# scatter plots
+tmp <- data %>%
+  group_by(survey_item) %>%
+  summarise(cor_p = round(cor(estimated, observed, method = "pearson"), 2),
+            cor_s = round(cor(estimated, observed, method = "spearman"), 2)) %>%
+  mutate(label = paste0("r_p = ", cor_p, ", r_s = ", cor_s),
+         observed = 400,
+         estimated = 200) 
+
+ggplot(data = data, aes(x = estimated, y = observed)) +
+  geom_point(aes(colour = phase, shape = phase)) +
+  geom_text(data = tmp, aes(label = label)) +
+  scale_color_manual(values = c(blue, red)) +
+  facet_wrap(vars(survey_item), ncol = 3, dir = "h") +
+  ambition_theme +
+  ylab("Observed minutes") +
+  xlab("Estimated minutes")
+
+
+# compute difference between estimated and observed and get descriptives
+
+# convert to long format to plot individual data
+tmp <- tidyr::pivot_longer(
+  data = data,
+  cols = c("observed", "estimated", "difference"),
+  names_to = "measure",
+  values_to = "total_min"
+) 
+
+tmp <- tmp %>% 
+  group_by(phase, survey_item, measure) %>%
+  summarise(
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>%
+  bind_rows(., 
+            tmp %>% 
+              group_by(survey_item, measure) %>%
+              summarise(
+                phase = "Whole sample",
+                mean = mean(total_min),
+                SD = sd(total_min),
+                min = min(total_min),
+                max = max(total_min),
+                SE = sd(total_min) / sqrt(n())
+              )
+  )
+
+# add to markdown
+tmp %>%
+  arrange(phase) %>%
+  kable(caption = "Estimated and observed minutes and difference therein", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+
+# plot sample average data
+tmp <- tmp[tmp$measure != "difference", ] 
+ggplot(data = tmp, aes(x = survey_item, y = mean, fill = measure)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  facet_wrap(vars(phase), ncol = 1) +
+  scale_fill_manual(values = c(coral, teal))  + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  xlab("Task") +
+  ylab("Minutes spent")
+
+
+
+
+```
+
+## Work conversations - time and location
+
+
+```{r, fig.width=7, fig.height=12, results='asis'}
+# prepare data
+conv <- inter %>%
+  # task finished before pupil hours
+  mutate(
+    pupil_hours = case_when(
+      time_end < pupil_hours_start ~ "before pupil hours",
+      time_start > pupil_hours_start & time_end < pupil_hours_end ~ "during pupil hours",
+      time_start > pupil_hours_end ~ "after pupil hours",
+      TRUE ~ NA_character_
+    )) %>%
+  mutate(pupil_hours = factor(pupil_hours, levels = c("before pupil hours", "during pupil hours", "after pupil hours"))) %>%
+  filter(grepl("B7", stakeholder))
+
+# Join tasks with locations on overlapping intervals
+tmp <- loco[, c("Name", "time_start", "time_end")]
+names(tmp) <- c("loc", "time_start_loc", "time_end_loc")
+
+conv_with_loc <- fuzzyjoin::interval_left_join(
+  x = conv,
+  y = tmp,
+  by = c("time_start" = "time_start_loc", "time_end" = "time_end_loc"))
+
+# remove any duplicated rows
+conv_with_loc <- conv_with_loc[!duplicated(conv_with_loc), ]
+
+# determine how much of each conversation happened at each location
+conv_with_loc <- conv_with_loc %>%
+  mutate(
+    # The actual overlap interval
+    overlap_start = pmax(time_start, time_start_loc),
+    overlap_end   = pmin(time_end, time_end_loc),
+    # Duration of overlap in seconds
+    overlap_secs  = as.numeric(overlap_end - overlap_start, units = "secs"),
+    # Proportion of the task/interaction spent at this location
+    overlap_prop  = overlap_secs / Duration_Seconds * 100)
+
+
+# identify all ids of conversations that took place in more than one location
+ids <- conv_with_loc %>%
+  group_by(Id) %>%
+  summarise(
+    n = n()) %>%
+  filter(n > 1) %>%
+  pull(Id)
+
+# limit data to those conversations that only took place in one location OR where there is an overlap of 5 seconds or more between location and conversation
+conv_with_loc <- conv_with_loc %>%
+  filter(!Id %in% ids | overlap_secs > 5)
+
+# identify all ids of conversations that took place in more than one location
+ids <- conv_with_loc %>%
+  group_by(Id) %>%
+  summarise(
+    n = n()) %>%
+  filter(n > 1) %>%
+  pull(Id)
+
+# determine data frame
+conv_with_loc <- conv_with_loc %>%
+  mutate(Location = if_else(Id %in% ids, "More than one location", loc)) %>%
+  select(Id, Obs_Id, Pseudonym, phase, School_code, Display_Name, Duration_Seconds, pupil_hours, Location) %>%
+  filter(!duplicated(.))
+
+# aggregate based on time
+tmp <- conv_with_loc %>%
+  group_by(phase, Pseudonym, pupil_hours, .drop = F) %>%
+  summarise(
+    count = n(),
+    total_min = sum(Duration_Seconds)/60) 
+
+# compute descriptives for time
+tmp <- tmp %>%
+  group_by(phase, pupil_hours, .drop = F) %>%
+  summarise(
+    total_count = sum(count),
+    total_minutes = sum(total_min),
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>% 
+  bind_rows(.,
+            tmp %>%
+              group_by(pupil_hours, .drop = F) %>%
+              summarise(
+                phase = "Whole sample",
+                total_count = sum(count),
+                total_minutes = sum(total_min),
+                mean = mean(total_min),
+                SD = sd(total_min),
+                min = min(total_min),
+                max = max(total_min),
+                SE = sd(total_min) / sqrt(n())
+              )) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary")))
+
+# print to markdown
+tmp %>%
+  arrange(phase) %>%
+  kable(caption = "Timing of work conversations", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# plot average minutes of work conversations by time of day
+ggplot(data = tmp, aes(x = pupil_hours, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Timing of work conversations") +
+  ylab("Minutes spent")
+
+
+# aggregate based on location
+tmp <- conv_with_loc %>%
+  group_by(phase, Pseudonym, Location, .drop = F) %>%
+  summarise(
+    count = n(),
+    total_min = sum(Duration_Seconds)/60) 
+
+
+# compute descriptives for location
+tmp <- tmp %>%
+  group_by(phase, Location, .drop = F) %>%
+  summarise(
+    total_count = sum(count),
+    total_minutes = sum(total_min),
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>% 
+  bind_rows(.,
+            tmp %>%
+              group_by(Location, .drop = F) %>%
+              summarise(
+                phase = "Whole sample",
+                total_count = sum(count),
+                total_minutes = sum(total_min),
+                mean = mean(total_min),
+                SD = sd(total_min),
+                min = min(total_min),
+                max = max(total_min),
+                SE = sd(total_min) / sqrt(n())
+              )) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary")))
+
+
+# print to markdown
+tmp %>%
+  arrange(phase) %>%
+  kable(caption = "Location of work conversations", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# plot average minutes of work conversations by location
+ggplot(data = tmp, aes(x = Location, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)) +
+  ambition_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Location of work conversations") +
+  ylab("Minutes spent")
+
+# group by time and location
+tmp <- conv_with_loc %>%
+  group_by(phase, Pseudonym, pupil_hours, Location, .drop = F) %>%
+  summarise(
+    count = n(),
+    total_min = sum(Duration_Seconds)/60) 
+
+# compute descriptives for location
+tmp <- tmp %>%
+  group_by(phase, pupil_hours, Location, .drop = F) %>%
+  summarise(
+    total_count = sum(count),
+    total_minutes = sum(total_min),
+    mean = mean(total_min),
+    SD = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>% 
+  bind_rows(.,
+            tmp %>%
+              group_by(pupil_hours, Location, .drop = F) %>%
+              summarise(
+                phase = "Whole sample",
+                total_count = sum(count),
+                total_minutes = sum(total_min),
+                mean = mean(total_min),
+                SD = sd(total_min),
+                min = min(total_min),
+                max = max(total_min),
+                SE = sd(total_min) / sqrt(n())
+              )) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary")))
+
+# print to markdown
+tmp %>%
+  arrange(phase) %>%
+  kable(caption = "Location of work conversations", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# plot average minutes of work conversations by location
+ggplot(data = tmp, aes(x = Location, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)) +
+  ambition_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  facet_wrap(vars(pupil_hours), ncol = 1) +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Location and timing of work conversations") +
+  ylab("Minutes spent")
+
+```
+
+
+## Observed hours in addition to evening working hours
+
+```{r, results='asis'}
+hours <- indiv %>%
+  select(Obs_Id, Pseudonym, time_start, time_end) %>%
+  group_by(Obs_Id, Pseudonym) %>%
+  summarise(
+    earliest = min(time_start),
+    latest = max(time_end)
+  ) %>% 
+  bind_rows(
+    .,
+    inter %>%
+      select(Obs_Id, Pseudonym, time_start, time_end) %>%
+      group_by(Obs_Id, Pseudonym) %>%
+      summarise(
+        earliest = min(time_start),
+        latest = max(time_end)
+      ))  %>% 
+  bind_rows(
+    .,
+    loco %>%
+      select(Obs_Id, Pseudonym, time_start, time_end) %>%
+      group_by(Obs_Id, Pseudonym) %>%
+      summarise(
+        earliest = min(time_start),
+        latest = max(time_end)
+      )) %>%
+  group_by(Obs_Id, Pseudonym) %>%
+  summarise(
+    start = min(earliest),
+    end = max(latest)
+  ) %>%
+  mutate(
+    phase = if_else(grepl("PST", Pseudonym), "Primary",
+                    if_else(grepl("SST", Pseudonym), "Secondary", NA)),
+    obs_h = difftime(end, start))
+
+
+eve <- eve[, c("Pseudonym", "Observed.day.evening.work.estimate..mins.")]
+names(eve) <- c("Pseudonym", "eve_est_min")
+eve$eve_est_min <- ifelse(eve$eve_est_min == "0 as it was a Friday, but 300 on Sunday (I think this should count but open to discussion)", "300", eve$eve_est_min)
+eve$eve_est_h <- lubridate::dhours(as.numeric(eve$eve_est_min) / 60)
+
+hours <- hours %>%
+  full_join(., eve) %>%
+  mutate(total_h = obs_h + eve_est_h)
+
+tmp <- tidyr::pivot_longer(
+  data = hours,
+  cols = c("obs_h", "eve_est_h", "total_h"),
+  names_to = "measure",
+  values_to = "duration")
+
+
+tmp <- tmp %>%
+  group_by(phase, measure) %>%
+  summarise(
+    mean = mean(duration) / 3600,
+    SD = sd(duration) / 3600,
+    min = min(duration) / 3600,
+    max = max(duration) / 3600,
+    SE = sd(duration) / sqrt(n()) / 3600
+  ) %>% bind_rows(
+    tmp %>%
+      group_by(measure) %>%
+      summarise(
+        phase = "Whole sample",
+        mean = mean(duration) / 3600,
+        SD = sd(duration) / 3600,
+        min = min(duration) / 3600,
+        max = max(duration) / 3600,
+        SE = sd(duration) / sqrt(n()) / 3600
+      )) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary")),
+         measure = if_else(measure == "eve_est_h", "Work before next working day",
+                           if_else(measure == "obs_h", "Observed",
+                                   if_else(measure == "total_h", "Total", NA)))
+  )
+
+
+# print to markdown
+tmp %>%
+  arrange(phase, measure) %>%
+  kable(caption = "Observed hours in addition to evening working hours", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# plot average minutes of work conversations by time of day
+ggplot(data = tmp, aes(x = measure, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Working hours") +
+  ylab("Hours spent")
+
+```
+
+## Task-switching
+
+```{r, results='asis'}
+# combine data from interactions and individual tasks
+data <- indiv %>%
+  bind_rows(inter) %>%
+  arrange(Pseudonym, time_start)
+
+data <- data %>%
+  group_by(Pseudonym) %>%
+  arrange(time_start) %>%
+  # combine variable levels for individual and stakeholder tasks
+  mutate(
+    task_description = case_when(
+      !is.na(stakeholder) & !is.na(activity_name) ~ paste(stakeholder, activity_name),
+      !is.na(stakeholder) ~ stakeholder,
+      !is.na(activity_name) ~ activity_name,
+      TRUE ~ NA_character_
+    )) %>%
+  # extract code
+  mutate(task_code = stringr::str_extract(task_description, "^[A-G][0-9]+")) %>%
+  # Identify task-switches
+  mutate(
+    prev_task = lag(task_description),
+    next_task = lead(task_description),
+    time_end_prev = lag(time_end),
+    time_start_next = lead(time_start)
+  ) %>%
+  # Calculate the time gaps
+  mutate(
+    gap_A_to_B_secs = as.numeric(difftime(time_start, time_end_prev, units = "secs")),
+    gap_B_to_A_secs = as.numeric(difftime(time_start_next, time_end, units = "secs"))
+  ) %>%
+  ungroup()
+
+# A task-switch is when:
+# prev_task == next_task AND task_description != prev_task (i.e., switched away and back)
+task_switches <- data %>%
+  filter(
+    !is.na(prev_task) & !is.na(next_task),
+    prev_task == next_task,   # A ... B ... A
+    task_description != prev_task         # B ≠ A
+  ) %>%
+  filter(
+    gap_A_to_B_secs <= 60 & gap_B_to_A_secs <= 60
+  )
+
+# teacher-level aggregates 
+tmp <- task_switches %>%
+  group_by(phase, Pseudonym) %>%
+  summarise(count = n(),
+            dur_B = mean(Duration_Seconds) / 60) %>%
+  ungroup() %>%
+  full_join(., hours) %>%
+  mutate(count_per_h = count / as.numeric(obs_h))
+
+# count per day
+tmp2 <- tmp %>% 
+  group_by(phase) %>%
+  summarise(
+    mean = mean(count),
+    SD = sd(count),
+    min = min(count),
+    max = max(count),
+    SE = sd(count) / sqrt(n())
+  ) %>%
+  bind_rows(., 
+            tmp %>% 
+              summarise(
+                phase = "Whole sample",
+                mean = mean(count),
+                SD = sd(count),
+                min = min(count),
+                max = max(count),
+                SE = sd(count) / sqrt(n())
+              )
+  )
+
+# add to markdown
+tmp2 %>%
+  arrange(phase) %>%
+  kable(caption = "Count of task switches per day", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# plot average minutes of work conversations by time of day
+ggplot(data = tmp2, aes(x = phase, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Sample") +
+  ylab("Count of task switches per day")
+
+# count per hour
+tmp2 <- tmp %>% 
+  group_by(phase) %>%
+  summarise(
+    mean = mean(count_per_h),
+    SD = sd(count_per_h),
+    min = min(count_per_h),
+    max = max(count_per_h),
+    SE = sd(count_per_h) / sqrt(n())
+  ) %>%
+  bind_rows(., 
+            tmp %>% 
+              summarise(
+                phase = "Whole sample",
+                mean = mean(count_per_h),
+                SD = sd(count_per_h),
+                min = min(count_per_h),
+                max = max(count_per_h),
+                SE = sd(count_per_h) / sqrt(n())
+              )
+  )
+
+# add to markdown
+tmp2 %>%
+  arrange(phase) %>%
+  kable(caption = "Count of task switches per hour", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# plot average minutes of work conversations by time of day
+ggplot(data = tmp2, aes(x = phase, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Sample") +
+  ylab("Count of task switches per hour")
+
+# duration of between tasks
+tmp2 <- tmp %>% 
+  group_by(phase) %>%
+  summarise(
+    mean = mean(dur_B),
+    SD = sd(dur_B),
+    min = min(dur_B),
+    max = max(dur_B),
+    SE = sd(dur_B) / sqrt(n())
+  ) %>%
+  bind_rows(., 
+            tmp %>% 
+              summarise(
+                phase = "Whole sample",
+                mean = mean(dur_B),
+                SD = sd(dur_B),
+                min = min(dur_B),
+                max = max(dur_B),
+                SE = sd(dur_B) / sqrt(n())
+              )
+  )
+
+# add to markdown
+tmp2 %>%
+  arrange(phase) %>%
+  kable(caption = "Duration of between tasks in minutes", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# plot average minutes of work conversations by time of day
+ggplot(data = tmp2, aes(x = phase, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Sample") +
+  ylab("Minutes spent")
+
+```
+
+## Interruptions
+
+```{r, results='asis'}
+# An interruption is when:
+# a task switch is caused conversational interruptions 
+# for a subset of interruptable tasks 
+interrupt <- task_switches %>%
+  # task finished before pupil hours
+  mutate(
+    pupil_hours = case_when(
+      time_end < pupil_hours_start ~ "before pupil hours",
+      time_start > pupil_hours_start & time_end < pupil_hours_end ~ "during pupil hours",
+      time_start > pupil_hours_end ~ "after pupil hours",
+      TRUE ~ NA_character_
+    )) %>%
+  mutate(pupil_hours = factor(pupil_hours, levels = c("before pupil hours", "during pupil hours", "after pupil hours")))
+
+# before teaching hours #
+interrupt_before <- interrupt %>%
+  filter(pupil_hours == "before pupil hours") %>%
+  # interrupted task
+  filter(grepl("^(A7.|B1.|B3.|B4.|B6.|D1.|D2.|D3.|D4.|D5.|D8.|F1.) ", prev_task)) %>%
+  # interrupted by
+  filter(grepl("^(B2.|B7.) ", task_description))
+
+# during teaching hours
+interrupt_during <- interrupt %>%
+  filter(pupil_hours == "during pupil hours") %>%
+  # interrupted task
+  filter(grepl("^(A2.|A5.|A6.|A7.|A9.|A10.|A11.|A12.|B1.|B3.|B4.|B6.|D1.|D2.|D3.|D4.|D5.|D8.|F1.) ", prev_task)) %>%
+  # interrupted by
+  filter(grepl("^(A3.|B2.|B7.) ", task_description))
+
+# after teaching hours
+interrupt_after <- interrupt %>%
+  filter(pupil_hours == "after pupil hours") %>%
+  # interrupted task
+  filter(grepl("^(A7.|B1.|B3.|B4.|B6.|D1.|D2.|D3.|D4.|D5.|D8.|F1.) ", prev_task)) %>%
+  # interrupted by
+  filter(grepl("^(B2.|B7.) ", task_description))
+
+# recombine
+interrupt <- interrupt_before %>%
+  bind_rows(interrupt_during) %>%
+  bind_rows(interrupt_after) %>%
+  # breakdown by type (pupil-related / work-related / informal)
+  mutate(
+    interrupt_type = case_when(
+      grepl("^(A3.) ", task_description) ~ "pupil-related",
+      grepl("^(B2.) ", task_description) ~ "informal",
+      grepl("^(B7.) ", task_description) ~ "work-related",
+      TRUE ~ NA_character_
+    )) %>%
+  mutate(type = factor(interrupt_type, levels = c("pupil-related", "work-related", "informal")))
+
+# compute teacher-level aggregates
+tmp <- interrupt %>%
+  group_by(phase, School_code, Pseudonym, pupil_hours, .drop = F) %>%
+  summarise(
+    count = n(),
+    min_lost = sum(Duration_Seconds)/60
+  ) %>%
+  tidyr::pivot_longer(
+    ., cols = c(count, min_lost),
+    names_to = "aggregate"
+  )
+
+# duration of between tasks
+tmp <- tmp %>% 
+  group_by(phase, pupil_hours, aggregate) %>%
+  summarise(
+    mean = mean(value),
+    SD = sd(value),
+    min = min(value),
+    max = max(value),
+    SE = sd(value) / sqrt(n())
+  ) %>%
+  bind_rows(., 
+            tmp %>% 
+              group_by(pupil_hours, aggregate) %>%
+              summarise(
+                phase = "Whole sample",
+                mean = mean(value),
+                SD = sd(value),
+                min = min(value),
+                max = max(value),
+                SE = sd(value) / sqrt(n())
+              )
+  ) %>%
+  mutate(phase = factor(phase, levels = c("Whole sample", "Primary", "Secondary")))
+
+# add to markdown
+tmp %>%
+  arrange(phase) %>%
+  kable(caption = "Count of interruptions and minutes lost", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# plot average minutes of work conversations by time of day
+ggplot(data = tmp, aes(x = phase, y = mean, fill = phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)) +
+  ambition_theme +
+  facet_grid(aggregate ~ pupil_hours) +
+  # facet_grid(pupil_hours ~ aggregate) +
+  scale_fill_manual(values = c(navy, blue, red))  + 
+  xlab("Sample") 
+
+```
+
