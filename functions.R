@@ -148,13 +148,13 @@ aggregate_obs <- function(
       tidyr::nesting(!!!syms(id_vars)),
       tidyr::nesting(!!!syms(secondary_group_vars)),
       fill = list(count = 0, dur = 0)
-    )
+    ) %>% 
+    mutate(Phase = if_else(grepl("PST", Pseudonym), "Primary", "Secondary"))
   
   if(return_teacher_level) return(agg_teach)
   
   # Main summarisation by primary and secondary group
-  tmp_phase <- agg_teach %>% 
-    mutate(Phase = if_else(grepl("PST", Pseudonym), "Primary", "Secondary")) %>%
+  tmp_phase <- agg_teach %>%
     group_by(across(all_of(c(primary_group_vars, secondary_group_vars))), .drop = FALSE) %>%
     summarise(
       across(
