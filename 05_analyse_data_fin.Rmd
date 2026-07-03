@@ -1,0 +1,2764 @@
+---
+title: "Time and motion quantitative analysis - final"
+author: "Stefanie Meliss"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+options(knitr.kable.NA = '')
+
+source(file = "03_process_data_fin.R")
+library(kableExtra)
+library(ggrepel)
+
+# combine all info on observations and schools
+# add observation date
+df_obs <- left_join(
+  # prepare data on observations
+  orig_obs %>%
+    mutate(
+      day_start = as.POSIXct(Start_Unix, origin = "1970-01-01", tz = "Europe/London"),
+      day_end = day_start + Duration_Seconds - 1,
+      day_dur_m = Duration_Seconds/60, 
+      day_dur_h = Duration_Seconds/3600, 
+    ) %>%
+    rename(
+      day_dur_s = Duration_Seconds
+    ) %>%
+    select(Obs_Id, Pseudonym, School_name, Phase, Observer, Date, day_start, day_end, day_dur_h, day_dur_m, day_dur_s)
+  ,
+  # add school-level info
+  orig_sch %>%
+    select(-Export.ID, -Survey.ID)
+) %>% 
+  # add pupil hours
+  mutate(
+    pup_start = paste(Date, Pupil.school.day.start.time.),
+    pup_end = paste(Date, Pupil.school.day.end.time),
+  ) %>%
+  mutate(
+    pup_start = as.POSIXct(pup_start, format = "%a %m/%d/%Y %I.%M%p", tz = "Europe/London"),
+    pup_end = as.POSIXct(pup_end, format = "%a %m/%d/%Y %I.%M%p", tz = "Europe/London")
+  ) %>%
+  select(-Pupil.school.day.start.time., -Pupil.school.day.end.time)
+
+```
+
+```{r df_inter}
+# prepare data
+df_inter <- left_join(
+  # add info on schools and obs
+  df_obs %>%
+    select(Obs_Id, Pseudonym, Observer, School_name, pup_start, pup_end, Phase, day_start, day_end, day_dur_h, day_dur_m, day_dur_s),
+  orig_inter %>%
+    # process data
+    mutate(
+      # time vars
+      time_start = as.POSIXct(Start_Unix, origin = "1970-01-01", tz = "Europe/London"),
+      time_end = time_start + Duration_Seconds - 1,
+      time_dur_s = Duration_Seconds,
+      time_dur_m = time_dur_s/60
+    ) %>%
+    select(Obs_Id, Id, Dimension, Label, Code, Dim_Code, Dim_Code2, Dim_Label, Dim_Label2, time_start, time_end, time_dur_s, time_dur_m)) %>%
+  # filter(Name != "None") %>%
+  # process data
+  mutate(
+    # grouping vars
+    stakeholder = Label,
+    stakeholder = factor(stakeholder, levels = lvl_stake),
+    # stake_group = if_else(grepl("^A[0-9]", stakeholder), "A. Pupils",
+    #                       if_else(grepl("^B[0-9]", stakeholder), "B. Colleagues",
+    #                               if_else(grepl("^C[0-9]", stakeholder), "C. Parents and other",
+    #                                       NA)))
+  ) %>%
+  # filter so that minimum duration is more than 1 second
+  filter(time_dur_s > 0) %>% 
+  # check for and remove duplicates by selecting first observation
+  group_by(Obs_Id, time_start) %>% 
+  mutate(obs_idx = row_number()) %>% 
+  filter(obs_idx == 1) %>% 
+  select(-obs_idx) %>%
+  # beauty correction
+  ungroup() %>%
+  arrange(Obs_Id, time_start) %>%
+  as.data.frame()
+```
+
+```{r df_indiv}
+# prepare data
+df_indiv <- left_join(
+  # add info on schools and obs
+  df_obs %>%
+    select(Obs_Id, Pseudonym, Observer, School_name, pup_start, pup_end, Phase, day_start, day_end, day_dur_h, day_dur_m, day_dur_s),
+  orig_indiv %>%
+    # process data
+    mutate(
+      # time vars
+      time_start = as.POSIXct(Start_Unix, origin = "1970-01-01", tz = "Europe/London"),
+      time_end = time_start + Duration_Seconds - 1,
+      time_dur_s = Duration_Seconds,
+      time_dur_m = time_dur_s/60
+    ) %>%
+    select(Obs_Id, Id, Dimension, Label, Code, Dim_Code, Dim_Code2, Dim_Label, Dim_Label2, time_start, time_end, time_dur_s, time_dur_m)) %>%
+  # filter(Name != "None") %>%
+  # process data
+  mutate(
+    # grouping vars
+    activity = Label,
+    activity = factor(activity, levels = lvl_act),
+    nonwork = if_else(grepl("F1|F2", activity), "Non-work activity", NA)
+  ) %>%
+  # filter so that minimum duration is more than 1 second
+  filter(time_dur_s > 0) %>% 
+  # check for and remove duplicates by selecting first observation
+  group_by(Obs_Id, time_start) %>% 
+  mutate(obs_idx = row_number()) %>% 
+  filter(obs_idx == 1) %>% 
+  select(-obs_idx) %>%
+  # beauty correction
+  ungroup() %>%
+  arrange(Obs_Id, time_start) %>%
+  as.data.frame()
+```
+
+```{r df_loco}
+# prepare data
+df_loco <- left_join(
+  # add info on schools and obs
+  df_obs %>%
+    select(Obs_Id, Pseudonym, Observer, School_name, pup_start, pup_end, Phase, day_start, day_end, day_dur_h, day_dur_m, day_dur_s),
+  orig_loco %>%
+    # process data
+    mutate(
+      # time vars
+      time_start = as.POSIXct(Start_Unix, origin = "1970-01-01", tz = "Europe/London"),
+      time_end = time_start + Duration_Seconds - 1,
+      time_dur_s = Duration_Seconds,
+      time_dur_m = time_dur_s/60
+    ) %>%
+    select(Obs_Id, Id, Dimension, Label, Code, Dim_Code, Dim_Code2, Dim_Label, Dim_Label2, time_start, time_end, time_dur_s, time_dur_m)) %>%
+  # filter(Name != "None") %>%
+  # process data
+  mutate(
+    # grouping vars
+    location = factor(Label, levels = lvl_act)
+  ) %>%
+  # filter so that minimum duration is more than 1 second
+  filter(time_dur_s > 0) %>% 
+  # check for and remove duplicates by selecting first observation
+  group_by(Obs_Id, time_start) %>% 
+  mutate(obs_idx = row_number()) %>% 
+  filter(obs_idx == 1) %>% 
+  select(-obs_idx) %>%
+  # beauty correction
+  ungroup() %>%
+  arrange(Obs_Id, time_start) %>%
+  as.data.frame()
+
+```
+
+```{r df_long, results='asis'}
+# combine all three dimensions
+df_long <- df_inter %>% 
+  bind_rows(df_indiv) %>%
+  bind_rows(df_loco)%>% 
+  ungroup() %>% 
+  # declare levels
+  mutate(
+    Label = factor(Label, levels = c(lvl, "None")),
+    Code = factor(Code, levels = lvl_c),
+    Dimension = factor(Dimension, levels = c("Interactions", "Individual", "Location")),
+    coded_bin = if_else(Label != "None", "Coded", "None")
+  )
+
+
+out <- bind_rows(
+  df_long %>%
+    group_by(Dimension) %>%
+    # unique entries
+    summarise(#Step = "Unique entries", 
+      unique = n()) %>%
+    ungroup() %>%
+    # raw export
+    mutate(
+      raw = c(nrow(orig_inter), nrow(orig_indiv), nrow(orig_loco)),
+    ) %>%
+    add_row(Dimension = "Total", unique = nrow(df_long), raw = sum(c(nrow(orig_inter), nrow(orig_indiv), nrow(orig_loco)))) %>%
+    mutate(
+      # recording errors
+      error = raw - unique
+    ) %>%
+    
+    tidyr::pivot_longer(cols = c("raw", "error", "unique")) %>%
+    mutate(value = as.character(value)) %>%
+    tidyr::pivot_wider(names_from = "Dimension", values_from = "value")
+  ,
+  # coded entries
+  bind_rows(
+    full_join(df_long %>%
+                group_by(Dimension, coded_bin) %>%
+                summarise(n = n()) %>%
+                ungroup(),
+              df_long %>%
+                group_by(Dimension) %>%
+                summarise(nrow = n()) %>%
+                ungroup()
+    ) %>%
+      mutate(
+        p = n/nrow*100,
+        c = paste0(n, " (", round(p, 1), "%)")
+        ) ,
+    df_long %>%
+      group_by(coded_bin) %>%
+      summarise(Dimension = "Total", n = n(), p = n()/nrow(.)*100) %>%
+      ungroup() %>%
+      mutate(c = paste0(n, " (", round(p, 1), "%)"))
+  ) %>%
+    tidyr::pivot_wider(id_cols = "coded_bin", names_from = "Dimension", values_from = "c") %>%
+    rename(name = coded_bin)
+)
+
+# identified irregularities: check for gaps
+tmp <- df_long %>%
+  group_by(Pseudonym, Dimension) %>%
+  arrange(time_start) %>%
+  mutate(
+    lag = lag(time_end),
+    diff = time_start - lag - 1,
+    gap = diff != 0,
+    gap = if_else(is.na(gap), F, gap)
+  ) %>%
+  ungroup() %>% 
+  group_by(Dimension) %>%
+  mutate(nrow = n()) %>%
+  ungroup() %>%
+  filter(gap == T)
+
+tmp <- bind_rows(
+  tmp %>%
+    group_by(Dimension, gap) %>% 
+    summarise(
+      n = n(), 
+      p = n()/min(nrow) * 100, 
+      unaccount = sum(diff, na.rm = T)
+    ) %>%
+    mutate(
+      c = paste0(n, " (", round(p, 1), "%)"), 
+      unaccount = as.character(as.numeric(unaccount))
+    )
+  ,
+  tmp %>%
+    group_by(gap) %>% 
+    summarise(
+      Dimension = "Total",
+      n = n(), 
+      p = n()/nrow(df_long) * 100, 
+      unaccount = sum(diff, na.rm = T)
+    ) %>%
+    mutate(
+      c = paste0(n, " (", round(p, 1), "%)"), 
+      unaccount = as.character(as.numeric(unaccount))
+    )
+)
+
+# combine and print
+out %>%
+  bind_rows(
+    tmp %>%
+      tidyr::pivot_wider(id_cols = "gap", names_from = "Dimension", values_from = "c") %>%
+      rename(name = gap) %>%
+      mutate(name = "irreg")
+    ,
+    tmp %>%
+      tidyr::pivot_wider(id_cols = "gap", names_from = "Dimension", values_from = "unaccount") %>%
+      rename(name = gap) %>%
+      mutate(name = "unacc")
+  ) %>%
+  kable(caption = "Overview of TimeCaT observation entries by dimension and data processing step", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  add_footnote("*Note.* Data from all N = 18 was combined.", notation = "none") %>%
+  print()
+
+
+```
+
+```{r df_wide}
+# prepare second-by-second match of the three dimensions - X-TENDED datasets #
+
+# INTERACTIONS #
+xtd_inter <- df_inter %>%
+  select(Id, Obs_Id, Pseudonym, Phase, School_name, pup_start, pup_end, Observer, time_start, time_end, time_dur_s, Label, Code, Dim_Label) %>%
+  rowwise() %>%
+  mutate(time_seq = list(seq(from = time_start, to = time_end, by = "1 sec"))) %>%
+  tidyr::unnest(time_seq) %>%
+  ungroup() %>%
+  rename(
+    id_stake = Id,
+    time_stamp = time_seq,
+    time_start_stake = time_start,
+    time_end_stake = time_end,
+    dur_stake = time_dur_s,
+    stake = Label,
+    code_stake = Code,
+    dim_stake = Dim_Label
+  ) %>%
+  # select(-Id, -time_start, -time_end, -time_dur_s) %>%
+  relocate(time_stamp) %>%
+  arrange(Pseudonym, time_stamp) %>%
+  # group_by(time_stamp, Observer) %>%
+  # mutate(time_dur_s = n()) %>%
+  # ungroup() %>%
+  mutate(stake_bin = if_else(stake == "None", "None", "Interaction")) %>%
+  as.data.frame()
+
+# INDIVIDUALS #
+xtd_indiv <- df_indiv %>%
+  select(Id, Obs_Id, Pseudonym, Phase, School_name, pup_start, pup_end, Observer, time_start, time_end, time_dur_s, Label, Code, Dim_Label) %>%
+  rowwise() %>%
+  mutate(time_seq = list(seq(from = time_start, to = time_end, by = "1 sec"))) %>%
+  tidyr::unnest(time_seq) %>%
+  ungroup() %>%
+  rename(
+    id_act = Id,
+    time_stamp = time_seq,
+    time_start_act = time_start,
+    time_end_act = time_end,
+    dur_act = time_dur_s,
+    act = Label,
+    code_act = Code,
+    dim_act = Dim_Label
+  ) %>%
+  # select(-Id, -time_start, -time_end, -time_dur_s) %>%
+  relocate(time_stamp) %>%
+  arrange(Pseudonym, time_stamp) %>%
+  # group_by(time_stamp, Observer) %>%
+  # mutate(time_dur_s = n()) %>%
+  # ungroup() %>%
+  mutate(act_bin = if_else(act == "None", "None", "Individual")) %>%
+  as.data.frame()
+
+# LOCATIONS #
+xtd_loco <- df_loco %>%
+  select(Id, Obs_Id, Pseudonym, Phase, School_name, pup_start, pup_end, Observer, time_start, time_end, time_dur_s, Label, Code, Dim_Label) %>%
+  rowwise() %>%
+  mutate(time_seq = list(seq(from = time_start, to = time_end, by = "1 sec"))) %>%
+  tidyr::unnest(time_seq) %>%
+  ungroup() %>%
+  rename(
+    id_loc = Id,
+    time_stamp = time_seq,
+    time_start_loc = time_start,
+    time_end_loc = time_end,
+    dur_loc = time_dur_s,
+    loc = Label,
+    code_loc = Code,
+    dim_loc = Dim_Label
+  ) %>%
+  # select(-Id, -time_start, -time_end, -time_dur_s) %>%
+  relocate(time_stamp) %>%
+  arrange(Pseudonym, time_stamp) %>%
+  # group_by(time_stamp, Observer) %>%
+  # mutate(time_dur_s = n()) %>%
+  # ungroup() %>%
+  as.data.frame()
+
+# MERGER #
+df_wide <- 
+  xtd_inter %>%
+  full_join(xtd_indiv) %>%
+  full_join(xtd_loco) %>%
+  relocate(Obs_Id, Pseudonym, Observer, Phase, School_name, pup_start, pup_end, time_stamp) 
+
+# process merged data
+df_wide <- df_wide %>%
+  group_by(Obs_Id, time_stamp) %>%
+  mutate(time_dur_s = n()) %>%
+  ungroup() %>%
+  mutate(
+    # fill in blanks
+    act = if_else(is.na(act), "None", act),
+    stake = if_else(is.na(stake), "None", stake),
+    # create variable that specifies if any record is available
+    no_record = stake == "None" & act == "None",
+    # binarise
+    indiv_bin = if_else(act == "None", 0, 1),
+    inter_bin = if_else(stake == "None", 0, 1),
+    # create variable representing multi-tasking
+    multi = if_else(indiv_bin == 0 & inter_bin == 1, "Interaction single-task",
+                    if_else(indiv_bin == 1 & inter_bin == 0, "Individual single-task",
+                            if_else(indiv_bin == 1 & inter_bin == 1, "Multi-task",
+                                    if_else(indiv_bin == 0 & inter_bin == 0, "No task", 
+                                            NA)))),
+    id_multi = if_else(indiv_bin == 0 & inter_bin == 1, id_stake,
+                       if_else(indiv_bin == 1 & inter_bin == 0, id_act,
+                               if_else(indiv_bin == 1 & inter_bin == 1, paste0(id_stake, "_", id_act),
+                                       if_else(indiv_bin == 0 & inter_bin == 0, NA, 
+                                               NA)))),
+    # create variable representing domain
+    task_inter = if_else(multi %in% c("Interaction single-task", "Multi-task"), "Interaction task", NA),
+    task_indiv = if_else(multi %in% c("Individual single-task", "Multi-task"), "Individual task", NA),
+    
+    # variables for non-work activity analysis
+    code_f2 = if_else(grepl("F2", act) & grepl("None|B6", stake), "F2A",
+                 if_else(grepl("F2", act) & ! grepl("None|B6", stake), "F2B",
+                         NA)),
+    f2 = if_else(grepl("F2", act) & grepl("None|B6", stake), "F2A. Restorative food and drink activity",
+                 if_else(grepl("F2", act) & ! grepl("None|B6", stake), "F2B. Non-restorative food and drink activity",
+                         NA)),
+    nonwork = if_else(grepl("F1", act) | grepl("F2A", f2), "Restorative non-work activity",
+                      if_else(grepl("F2B", f2), "Non-restorative non-work activity",
+                              NA)),
+    # task finished before pupil hours
+    pupil_hours = case_when(
+      time_stamp < pup_start ~ "Before pupil hours",
+      time_stamp >= pup_start & time_stamp <= pup_end ~ "During pupil hours",
+      time_stamp > pup_end ~ "After pupil hours",
+      TRUE ~ NA_character_
+    )) %>%
+  mutate(
+    pupil_hours = factor(pupil_hours, levels = c("Before pupil hours", "During pupil hours", "After pupil hours"))
+  ) %>%
+  arrange(time_stamp) %>% # Replace 'order_var' with your ordering variable
+  group_by(id_act) %>%
+  mutate(
+    # Only calculate f2_change for F2, else FALSE
+    f2_change = if_else(!is.na(f2),
+                        (f2 != lag(f2)) | (row_number() == 1),
+                        FALSE),  
+    nonwork_change = if_else(!is.na(nonwork),
+                             (nonwork != lag(nonwork)) | (row_number() == 1),
+                             FALSE),  
+  ) %>%
+  mutate(
+    # Only calculate nonwork_seq for F2, else NA_integer_
+    f2_seq = if_else(!is.na(f2),
+                     cumsum(f2_change),
+                     NA_integer_),
+    nonwork_seq = if_else(!is.na(nonwork),
+                          cumsum(nonwork_change),
+                          NA_integer_),
+    id_act_f2 = if_else(!is.na(f2),
+                        stringr::str_c(id_act, "_", stringr::str_pad(f2_seq, 2, pad = "0")),
+                        NA_character_),
+    id_act_nonwork = if_else(!is.na(nonwork),
+                             stringr::str_c(id_act, "_", stringr::str_pad(nonwork_seq, 2, pad = "0")),
+                             NA_character_)
+  ) %>%
+  select(-f2_change, -nonwork_change, -f2_seq, -nonwork_seq) %>%
+  ungroup()
+
+```
+
+```{r timeline, eval = FALSE, fig.height=7}
+# subset data
+data_ts <- df_long[df_long$Obs_Id == id & df_long$Label != "None", ]
+
+# process
+data_ts <- data_ts %>%
+  # limit window
+  filter(time_end > window_start & time_start < window_end) %>%
+  arrange(Dimension, time_start) %>%
+  mutate(
+    # adjust timings to the closest value above the threshold
+    time_end = if_else(time_end > window_end, 
+                       # time_end[time_end > window_end][which.min(time_end[time_end > window_end] - window_end)],
+                       window_end,
+                       time_end),
+    time_start = if_else(time_start < window_start, 
+                         # time_start[time_start > window_start][which.min(time_start[time_start > window_start] - window_start)],
+                         window_start,
+                         time_start),
+    
+    # mid point for labels
+    dur_new = difftime(time_end, time_start),
+    time_mid = time_start + dur_new/2,
+    
+    # convert date time into minutes since start
+    y_start = as.numeric(difftime(time_start, min(time_start), units = "mins")),
+    y_end = as.numeric(difftime(time_end, min(time_start), units = "mins")),
+    y_mid = as.numeric(difftime(time_mid, min(time_start), units = "mins")),
+    
+    # fill colour
+    fill_col = if_else(Dimension != "Location", Dim_Code, Code),
+  ) %>%
+  group_by(Dimension) %>%
+  mutate(
+    side = rep(c("left", "right"), length.out = n()),
+  ) %>%
+  ungroup() %>%
+  as.data.frame()
+
+# Create a data_ts frame for the background (full day) box
+data_bg <- data.frame(
+  start = min(data_ts$time_start),
+  start_y = min(data_ts$y_start),
+  end = max(data_ts$time_end),
+  end_y = max(data_ts$y_end)
+)
+
+p <- ggplot() + ambition_theme +
+  # Grey background for the day
+  geom_rect(
+    data = data_bg,
+    aes(xmin = .95, xmax = 1.05,  # x position for each individual
+        ymin = start_y, ymax = end_y),
+    fill = black10,
+  ) +
+  # Task rectangles
+  geom_rect(
+    data = data_ts,
+    aes(xmin = .9, xmax = 1.1, ymin = y_start, ymax = y_end, 
+        fill = fill_col), 
+    colour = black, linewidth = 0.05
+  ) +
+  scale_fill_manual(values = fill_col) +
+  scale_y_continuous(
+    name = "Time",
+    breaks = seq(0, 60, 5),
+    limits = c(0, max(data_ts$y_end))) +
+  facet_grid(cols = vars(Dimension), drop = F) +
+  theme(legend.position = "none") + 
+  guides(fill = guide_legend(ncol = 1)) + 
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    # axis.text.y = element_blank()
+  ) +
+  coord_cartesian(xlim = c(0.5,1.5)) +
+  # Labels to the left
+  geom_label_repel(data = data_ts[data_ts$side == "left", ],
+                   aes(x = 0.99, y = y_mid, label = Code), # Just right of xmin = 0.9
+                   nudge_x = -0.25,  # Nudge left
+                   hjust = 0.5, vjust = 0.5, # centres text vertically and horizontally
+                   direction = "both"
+  ) +
+  # Labels to the right
+  geom_label_repel(data = data_ts[data_ts$side == "right", ],
+                   aes(x = 1.01, y = y_mid, label = Code), # Just left of xmax = 1.1
+                   nudge_x = 0.25,  # Nudge right
+                   hjust = 0.5, vjust = 0.5, # centres text vertically and horizontally
+                   direction = "both"
+  )
+
+# # DEBUG: graphs with time of day
+# p <- ggplot() + ambition_theme +
+#   # Grey background for the day
+#   geom_rect(
+#     data = data_bg,
+#     aes(xmin = .95, xmax = 1.05,  # x position for each individual
+#         ymin = start, ymax = end),
+#     fill = black10,
+#   ) +
+#   # Task rectangles
+#   geom_rect(
+#     data = data_ts,
+#     aes(xmin = .9, xmax = 1.1, ymin = time_start, ymax = time_end, 
+#         fill = fill_col), 
+#     colour = black, linewidth = 0.05
+#   ) +
+#   scale_fill_manual(values = fill_col) +
+#   scale_y_datetime(
+#     name = "Time of day",
+#     breaks = seq(data_bg$start, data_bg$end, by = "5 mins"),
+#     date_labels = "%H:%M",
+#     limits = c(data_bg$start, data_bg$end),
+#     sec.axis = sec_axis(
+#       # Transform: convert POSIXct to minutes since day_start
+#       trans = ~ as.numeric(difftime(., data_bg$start, units = "mins")),
+#       name = "Minutes since start")
+#   ) +
+#   facet_grid(cols = vars(Dimension)) +
+#   theme(legend.position = "none") + 
+#   guides(fill = guide_legend(ncol = 1)) + 
+#   theme(
+#     panel.grid.major.x = element_blank(),
+#     panel.grid.minor.x = element_blank(),
+#     axis.title.x = element_blank(),
+#     axis.ticks.x = element_blank(),
+#     axis.text.x = element_blank(),
+#   ) +
+#   coord_cartesian(xlim = c(0.5,1.5)) +
+#   # Labels to the left
+#   geom_label_repel(data = data_ts[data_ts$side == "left", ],
+#                    aes(x = 0.95, y = time_mid, label = Code), # Just right of xmin = 0.9
+#                    nudge_x = -0.25,  # Nudge left
+#                    hjust = 0.5, vjust = 0.5, # centres text vertically and horizontally
+#                    direction = "both"
+#   ) +
+#   # Labels to the right
+#   geom_label_repel(data = data_ts[data_ts$side == "right", ],
+#                    aes(x = 1.05, y = time_mid, label = Code), # Just left of xmax = 1.1
+#                    nudge_x = 0.25,  # Nudge right
+#                    hjust = 0.5, vjust = 0.5, # centres text vertically and horizontally
+#                    direction = "both"
+#   )
+
+p
+
+```
+
+# Timeline plots
+
+```{r figs, fig.height=7, eval = T}
+# determine colours
+fill_col <- c(
+  navy, # A_teach
+  col.tint(navy, .6), # A
+  teal, # B
+  black40, # C
+  coral, # D
+  cyan, # E
+  orange, # F
+  purple, # G
+  blue, # TS1
+  blue, # TS2
+  red, # TS3
+  red, # TS4
+  black40, # TS5
+  rep(yellow, sum(grepl("^SW[0-9]", lvl))),
+  rep(yellow, sum(grepl("^SA[0-9]", lvl))),
+  rep(yellow, sum(grepl("^SC[0-9]", lvl)))
+)
+names(fill_col) <- c(
+  "A_teach", "A", "B", "C", "D", "E", "F", "G", 
+  "TS1", "TS2", "TS3", "TS4", "TS5", 
+  "SW1", "SW2", "SW3", "SW4", 
+  "SA1", "SA2", "SA3", 
+  "SC1", "SC2", "SC3", "SC4"
+)
+
+# subset data for teacher
+id <- "-OmhS-f4fCg8wOO2Rx4Z"
+ps <- "SST6"
+
+# determine start and end times
+window_start <- as.POSIXct("2026-03-02 11:07:00")
+window_end <- as.POSIXct("2026-03-02 11:37:00")
+
+# create plot
+cat("\nFig 2\n")
+<<timeline>>
+
+# subset data for teacher
+id <- "-OfT0nqTJmLp5mY8Xe7M"
+ps <- "PST1"
+
+# determine start and end times
+window_start <- as.POSIXct("2025-12-02 08:02:20")
+window_end <- as.POSIXct("2025-12-02 08:17:20")
+
+# create plot
+cat("\nFig 5\n")
+<<timeline>>
+
+# determine start and end times
+window_start <- as.POSIXct("2025-12-02 12:48:15")
+window_end <- as.POSIXct("2025-12-02 13:03:15")
+
+# create plot
+cat("\nFig 9\n")
+<<timeline>>
+
+# determine start and end times
+window_start <- as.POSIXct("2025-12-02 08:47:00")
+window_end <- as.POSIXct("2025-12-02 09:07:00")
+
+# create plot
+cat("\nFig 10\n")
+<<timeline>>
+
+# subset data for teacher
+id <- "-OiqJf-El_Wa6Se-GG7N"
+ps <- "PST4"
+
+# determine start and end times
+window_start <- as.POSIXct("2026-01-13 10:45:22")
+window_end <- as.POSIXct("2026-01-13 11:05:22")
+
+# create plot
+cat("\nFig 11\n")
+<<timeline>>
+
+# determine start and end times
+window_start <- as.POSIXct("2026-01-13 12:04:05")
+window_end <- as.POSIXct("2026-01-13 12:44:05")
+
+# create plot
+cat("\nFig 12\n")
+<<timeline>>
+
+# subset data for teacher
+id <- "-On11sXtO7bdxrct2nV8"
+ps <- "SST9"
+
+# determine start and end times
+window_start <- as.POSIXct("2026-03-06 11:34:00")
+window_end <- as.POSIXct("2026-03-06 12:04:00")
+
+# create plot
+cat("\nFig 13\n")
+<<timeline>>
+
+```
+
+# Observed hours and evening hours
+
+```{r, results='asis'}
+# TOTAL LENGTH OF OBSERVED DAY #
+
+# aggregate observation duration
+data_agg <- aggregate_obs(
+  data = df_obs %>%  mutate(status = T),
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("status"),
+  obs_id_var = "Obs_Id",
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "day_dur_m"
+)
+# select cols and rename
+data_agg <- data_agg[, grepl("Phase|_dur", names(data_agg))]
+
+# print
+data_agg %>%
+  arrange(Phase) %>%
+  kable(caption = "Average length of day observed", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  add_footnote("*Note.* Results are reported in hours.", notation = "none") %>%
+  print()
+
+# OBSERVATION PER DIMENSION 
+data_agg <- bind_rows(
+  # BY DIMENSION
+  full_join(
+    # minutes
+    aggregate_obs(
+      data = df_long %>% filter(Label != "None"),
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("Dimension"),
+      factor_levels = c("Whole sample", "Primary", "Secondary")
+    ),
+    # hours
+    aggregate_obs(
+      data = df_long %>% filter(Label != "None"),
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("Dimension"),
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_m"
+    )
+  ),
+  # COMBINE INTER & INDIV
+  full_join(
+    # minutes
+    aggregate_obs(
+      data = df_long %>% filter(Label != "None") %>% mutate(Dimension = if_else(Dimension == "Location", NA, "Tasks")),
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("Dimension"),
+      factor_levels = c("Whole sample", "Primary", "Secondary")
+    ),
+    # hours
+    aggregate_obs(
+      data = df_long %>% filter(Label != "None") %>% mutate(Dimension = if_else(Dimension == "Location", NA, "Tasks")),
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("Dimension"),
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_m"
+    )
+  ) %>% filter(!is.na(Dimension))
+)
+
+# print
+data_agg %>%
+  arrange(Phase) %>%
+  kable(caption = "Observations by domain", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  add_header_above(header = c(" " = 2, "Total counts" = 7, "Total minutes" = 7, "Total hours" = 7)) %>%
+  add_footnote("*Note.* Results are reported in minutes and hours.", notation = "none") %>%
+  print()
+
+```
+
+### **Table**
+### *Descriptive statistics on the observed hours in addition to self-reported additional hours worked after observation before the next working day*
+
+```{r, results='asis'}
+# preapre evening hour data
+df_eve <- orig_eve[, c("Pseudonym", "Observed.day.evening.work.estimate..mins.")]
+names(df_eve)[2] <- "eve_est_min"
+df_eve$eve_est_min <- ifelse(df_eve$eve_est_min == "0 as it was a Friday, but 300 on Sunday (I think this should count but open to discussion)", "300", df_eve$eve_est_min)
+df_eve$eve_est_h <- lubridate::dhours(as.numeric(df_eve$eve_est_min) / 60)
+
+# join with observed hours
+data_hrs <- df_obs %>%
+  mutate(day_dur_h = lubridate::dhours(as.numeric(day_dur_s) / 3600)) %>%
+  full_join(., df_eve) %>%
+  mutate(total_h = day_dur_h + eve_est_h)
+
+# prepare data for aggregation
+data_hrs <- tidyr::pivot_longer(
+  data = data_hrs,
+  cols = c("day_dur_h", "eve_est_h", "total_h"),
+  names_to = "measure",
+  values_to = "time_dur_s") %>%
+  mutate(
+    time_dur_s = as.numeric(time_dur_s),
+    time_dur_m = time_dur_s/60)
+
+# aggregate observation duration
+data_agg <- 
+  full_join(
+    # in minutes
+    aggregate_obs(
+      data = data_hrs,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("measure"),
+      obs_id_var = "Obs_Id",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s"
+    )
+    ,
+    # in hours
+    aggregate_obs(
+      data = data_hrs,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("measure"),
+      obs_id_var = "Obs_Id",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_m"
+    )
+  ) %>%
+  mutate(Phase = factor(Phase, levels = c("Whole sample", "Primary", "Secondary")),
+         measure = if_else(measure == "eve_est_h", "Work before next working day",
+                           if_else(measure == "day_dur_h", "Observed",
+                                   if_else(measure == "total_h", "Total", NA)))
+  )
+
+# select cols and rename
+tmp <- data_agg[, grepl("Phase|meas|_hrs", names(data_agg))]
+names(tmp) <- gsub("_hrs", "", names(tmp))
+
+# reformat 
+tmp <- tmp %>%
+  mutate(
+    desc = paste0(round(mean, 2), " (", round(sd, 2), ") [", round(min, 2), "; ", round(max, 2), "]"),
+    measure = factor(measure, levels = c("Observed", "Work before next working day", "Total"))
+  ) %>%
+  select(c(Phase, measure, desc)) %>%
+  tidyr::pivot_wider(., 
+                     id_cols = measure, 
+                     names_from = Phase, 
+                     values_from = desc,
+                     names_glue = "{Phase}") %>%
+  relocate(`Whole sample`, .after = measure)
+
+# export
+names(tmp) <- c("Working hours", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(tmp, "desc_obs_eve.csv", row.names = F)
+
+# print to markdown
+tmp %>%
+  arrange(`Working hours`) %>%
+  kable(caption = "Observed hours in addition to evening working hours", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  add_footnote("*Note.* Results are reported in hours.", notation = "none") %>%
+  print()
+```
+
+# Stakeholder interactions
+
+### **Figure**
+### *Overview of average total minutes teachers spent engaging with stakeholders and teaching over the observed day*
+
+```{r, results='asis'}
+data_agg <- bind_rows(
+  # aggregate stakeholder groups
+  aggregate_obs(
+    data = df_inter,
+    primary_group_vars = c("Phase"),
+    secondary_group_vars = c("Dim_Label"),
+    factor_levels = c("Whole sample", "Primary", "Secondary")
+  ) %>%
+    rename(stakeholder = Dim_Label) %>%
+    mutate(cat = "Interaction with stakeholder groups") %>%
+    filter(!is.na(stakeholder)) 
+  ,
+  # teaching time tasks
+  aggregate_obs(
+    data = df_inter %>% filter(Dim_Code == "A"),
+    primary_group_vars = c("Phase"),
+    secondary_group_vars = c("Dim_Label2"),
+    factor_levels = c("Whole sample", "Primary", "Secondary")
+  ) %>%
+    rename(stakeholder = Dim_Label2) %>%
+    mutate(cat = "Pupil interactions") %>%
+    filter(!is.na(stakeholder)) 
+) %>% 
+  mutate(stakeholder = factor(stakeholder, levels = c("A. Pupils", "B. Colleagues", "C. Parents and other", "Teaching interactions", "Other pupil interactions")))
+
+# plot
+ggplot(data = data_agg, aes(x = stakeholder, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  # coord_cartesian(ylim = c(0, 360)) +
+  facet_grid(cols = vars(cat), scales = "free_x", space = "free_x") +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(stringr::str_replace_all(x, "foo" , " "),
+                                                          width = 15)) +
+  ylab("Minutes spent") +
+  xlab("")  +
+  labs(fill = "Teacher group")
+cat("\n\n")
+cat("*Note.* For each teacher, total minutes spent engaging with stakeholders and teaching were summed. Summary statistics were then calculated across teachers. Bars represent M whereas error bars represent SE.\n\n")
+```
+
+### **Figure**
+### *Breakdown of teacher-aggregated total minutes spent in stakeholder interactions*
+
+
+```{r, results='asis'}
+# aggregate stakeholder interactions
+data_agg <- aggregate_obs(
+  data = df_inter,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("stakeholder"),
+  factor_levels = c("Whole sample", "Primary", "Secondary")
+) %>%
+  filter(!is.na(stakeholder))
+
+data_agg$label <- stringr::str_sub(data_agg$stakeholder, 1, 4)
+data_agg$label <- gsub(" ", "", data_agg$label)
+data_agg$label <- factor(data_agg$label, levels = c(paste0("A", 1:12, "."), paste0("B", 1:7, "."), paste0("C", 1:4, ".")))
+
+# ce
+a <- ggplot(data = data_agg[grepl("^A[0-9]", data_agg$stakeholder), ], aes(x = label, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  # coord_cartesian(ylim = c(0, 200)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Pupil interactions")
+
+b <- ggplot(data = data_agg[grepl("^B[0-9]", data_agg$stakeholder), ], aes(x = label, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 60)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Colleague interactions")
+
+c <- ggplot(data = data_agg[grepl("^C[0-9]", data_agg$stakeholder), ], aes(x = label, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 60)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  labs(fill = "Teacher group") +
+  ylab("Minutes spent") +
+  xlab("Other stakeholder interactions")
+
+
+
+ggpubr::ggarrange(a + theme(legend.position = "none"),
+                  ggpubr::ggarrange(b + theme(legend.position = "none"), c + theme(legend.position = "none"), 
+                                    ncol = 2, labels = c("B", "C"),
+                                    font.label = list(size = 14), 
+                                    widths = c(1.25, 1),
+                                    vjust = 1), 
+                  nrow = 2, 
+                  labels = "A", 
+                  font.label = list(size = 14),
+                  vjust = 1,
+                  common.legend = T, legend = "bottom") 
+cat("\n\n")
+cat("*Note.* For each teacher, total minutes spent engaging in various stakeholder interactions with pupils (A), colleagues (B) and other stakeholders (C) were summed. Summary statistics were then calculated across teachers. Bars represent M whereas error bars represent SE.\n\n")
+
+
+```
+
+### **Table**
+### *Descriptive statistics on the duration of stakeholder interactions*
+
+```{r, results='asis'}
+
+# aggregate stakeholder interactions
+data_agg <- aggregate_obs(
+  data = df_inter,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("stakeholder"),
+  factor_levels = c("Whole sample", "Primary", "Secondary")
+) %>%
+  filter(!is.na(stakeholder)) %>%
+  bind_rows(
+    # aggregate stakeholder groups
+    aggregate_obs(
+      data = df_inter,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("Dim_Label"),
+      factor_levels = c("Whole sample", "Primary", "Secondary")
+    ) %>%
+      rename(stakeholder = Dim_Label) %>%
+      filter(!is.na(stakeholder)) 
+  ) %>%
+  bind_rows(
+    # teaching time tasks
+    aggregate_obs(
+      data = df_inter %>% filter(Dim_Code == "A"),
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("Dim_Label2"),
+      factor_levels = c("Whole sample", "Primary", "Secondary")
+    ) %>%
+      rename(stakeholder = Dim_Label2) %>%
+      filter(!is.na(stakeholder)) 
+  ) %>% 
+  ungroup() %>%
+  as.data.frame()
+
+# duration
+dat <- data_agg[, grepl("Phase|stakeholder|_mins", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_mins", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = stakeholder, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("stakeholder", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  # pupil
+  mutate(stakeholder = "Pupil interactions") %>%
+  bind_rows(., dat %>% filter(grepl("^A[0-9]", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("^Teach", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("^Other", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("A. Pupils", stakeholder))) %>%
+  # colleague
+  bind_rows(., tmp %>% mutate(stakeholder = "Colleague interactions")) %>%
+  bind_rows(., dat %>% filter(grepl("^B[0-9]", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("B. Coll", stakeholder))) %>%
+  # other
+  bind_rows(., tmp %>% mutate(stakeholder = "Parent and other stakeholder interactions")) %>%
+  bind_rows(., dat %>% filter(grepl("^C[0-9]", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("C. Par", stakeholder)))
+
+# export
+names(out) <- c("Stakeholder interaction", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_inter_dur.csv", row.names = F)
+
+# print
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+
+```
+
+
+### **Table**
+### *Descriptive statistics on the frequency of stakeholder interactions*
+
+```{r, results='asis'}
+# frequency
+dat <- data_agg[, grepl("Phase|stakeholder|_count", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_count", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = stakeholder, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("stakeholder", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  # pupil
+  mutate(stakeholder = "Pupil interactions") %>%
+  bind_rows(., dat %>% filter(grepl("^A[0-9]", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("^Teach", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("^Other", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("A. Pupils", stakeholder))) %>%
+  # colleague
+  bind_rows(., tmp %>% mutate(stakeholder = "Colleague interactions")) %>%
+  bind_rows(., dat %>% filter(grepl("^B[0-9]", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("B. Coll", stakeholder))) %>%
+  # other
+  bind_rows(., tmp %>% mutate(stakeholder = "Parent and other stakeholder interactions")) %>%
+  bind_rows(., dat %>% filter(grepl("^C[0-9]", stakeholder))) %>%
+  bind_rows(., dat %>% filter(grepl("C. Par", stakeholder)))
+
+# export
+names(out) <- c("Stakeholder interaction", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_inter_freq.csv", row.names = F)
+
+# print
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+```
+
+
+# Individual tasks
+
+### **Figure**
+### *Breakdown of teacher-aggregated total minutes spent conducting individual activities*
+
+```{r, results='asis'}
+# individual activities
+data_agg <- aggregate_obs(
+  data = df_indiv,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("activity"),
+  factor_levels = c("Whole sample", "Primary", "Secondary")
+) %>%
+  filter(!is.na(activity))
+
+data_agg$label <- stringr::str_sub(data_agg$activity, 1, 4)
+data_agg$label <- gsub(" ", "", data_agg$label)
+
+d <- ggplot(data = data_agg[grepl("^D[0-9]", data_agg$activity), ], aes(x = label, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 50)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Individual work related to pupil learning and pastoral duties")
+
+e <- ggplot(data = data_agg[grepl("^E[0-9]", data_agg$activity), ], aes(x = label, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 40)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Other individual tasks")
+
+f <- ggplot(data = data_agg[grepl("^F[0-9]", data_agg$activity), ], aes(x = label, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 40)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  labs(fill = "Teacher group") +
+  ylab("Minutes spent") +
+  xlab("Non-work activity")
+
+
+g <- ggplot(data = data_agg[grepl("^G[0-9]", data_agg$activity), ], aes(x = label, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 40)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  labs(fill = "Teacher group") +
+  ylab("Minutes spent") +
+  xlab("Motion")
+
+
+ggpubr::ggarrange(d + theme(legend.position = "none"),
+                  ggpubr::ggarrange(e + theme(legend.position = "none"), 
+                                    f + theme(legend.position = "none"), 
+                                    g + theme(legend.position = "none"), 
+                                    ncol = 3, widths = c(2, 1.5, 1),
+                                    labels = c("B", "C", "D"),
+                                    font.label = list(size = 14), 
+                                    vjust = 1), 
+                  nrow = 2, 
+                  labels = "A", 
+                  font.label = list(size = 14),
+                  vjust = 1,
+                  common.legend = T, legend = "bottom") 
+cat("\n\n")
+cat("*Note.* For each teacher, total minutes spent engaging in various individual tasks related to pupil learning and pastorial duties (A), other individual tasks (B), recreation (C) and traveling through the school (D) were summed. Summary statistics were then calculated across teachers. Bars represent M whereas error bars represent SE.\n\n")
+
+
+
+```
+
+```{r, eval=F}
+# aggregate
+aggregate_obs(
+  # rest
+  data = df_wide,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("act"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s"
+) %>% 
+  filter(grepl("F1", act))
+
+# aggregate
+aggregate_obs(
+  # food and drink
+  data = df_wide,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("act"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s"
+) %>% 
+  filter(grepl("F2", act))
+
+
+# aggregate
+aggregate_obs(
+  # food and drink
+  data = df_wide,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("f2"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s"
+)
+
+# aggregate
+aggregate_obs(
+  # restorative non-work
+  data = df_wide,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("nonwork"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s"
+)
+
+
+aggregate_obs(
+  # Total non-work activity
+  data = df_wide,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("dim_act"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s"
+) %>%
+  filter(grepl("F", dim_act))
+
+```
+
+
+
+```{r, eval=F}
+
+# Filter F2 tasks
+f2 <- df_indiv %>%
+  filter(grepl("F2", Label))
+
+# f2 %>% 
+#   group_by(Pseudonym) %>% 
+#   summarise(dur_mins = sum(time_dur_s)/60) %>% summarise(m = mean(dur_mins), sd = sd(dur_mins), min = min(dur_mins), max = max(dur_mins))
+
+# add an empty row at the start of the stakeholder interactions for each ppt to have "none" from the start of the observation to the first recorded observation
+tmp <- df_inter %>%
+  ungroup() %>%
+  select(Observer, Pseudonym, Label, Code, time_start, time_end, day_start, Id) %>%
+  group_by(Pseudonym) %>%
+  group_modify(~ add_row(.x, Label = "None", .before = 1)) %>%
+  mutate(
+    Observer = if_else(is.na(Observer), min(Observer, na.rm = T), Observer),
+    time_end = if_else(is.na(time_end), min(time_start, na.rm = T), time_end),
+    time_start = if_else(is.na(time_start), min(day_start, na.rm = T), time_start),
+  ) %>%
+  ungroup() %>%
+  select(-day_start, -Pseudonym)
+names(tmp) <- c("Observer", "stake", "code_stake", "time_start_stake", "time_end_stake", "Id_stake")
+
+# combine stakeholder interaction and individual activity data
+f2_stake <- fuzzyjoin::interval_left_join(
+  x = f2 %>% filter(Observer == "Ryan Yung"),
+  y = tmp %>% filter(Observer == "Ryan Yung"),
+  by = c("time_start" = "time_start_stake", "time_end" = "time_end_stake")) %>%
+  ungroup() %>%
+  bind_rows(.,
+            fuzzyjoin::interval_left_join(
+              x = f2 %>% filter(Observer == "Rebecca Curtis"),
+              y = tmp %>% filter(Observer == "Rebecca Curtis"),
+              by = c("time_start" = "time_start_stake", "time_end" = "time_end_stake")) %>%
+              ungroup()) %>% 
+  mutate(
+    overlap = compute_overlap(start1 = time_start, end1 = time_end, start2 = time_start_stake, end2 = time_end_stake),
+    Observer = Observer.x) %>%
+  select(-Observer.x, -Observer.y)
+
+# f2_stake %>% 
+#   select(Pseudonym, Label, time_start, time_end, time_dur_s) %>% 
+#   filter(!duplicated(.)) %>% 
+#   group_by(Pseudonym) %>% 
+#   summarise(
+#     dur_mins = sum(time_dur_s)/60) #%>% summarise(m = mean(dur_mins), sd = sd(dur_mins), min = min(dur_mins), max = max(dur_mins))
+# 
+# f2_stake %>% 
+#   group_by(Pseudonym) %>% 
+#   summarise(dur_mins = sum(overlap)/60) %>%
+#   ungroup() %>%
+#   tidyr::complete(Pseudonym, fill = list(dur_mins = 0))  #%>% summarise(m = mean(dur_mins), sd = sd(dur_mins), min = min(dur_mins), max = max(dur_mins))
+# 
+# f2_stake %>%
+#   mutate(Pseudonym = factor(Pseudonym)) %>%
+#   filter(grepl("B6.|None", stake)) %>%
+#   group_by(Pseudonym) %>% 
+#   summarise(dur_mins = sum(overlap)/60) %>%
+#   ungroup() %>%
+#   tidyr::complete(Pseudonym, fill = list(dur_mins = 0)) %>% summarise(m = mean(dur_mins), sd = sd(dur_mins), min = min(dur_mins), max = max(dur_mins))
+# 
+# f2_stake %>%
+#   mutate(Pseudonym = factor(Pseudonym)) %>%
+#   filter(!grepl("B6.|None", stake)) %>%
+#   group_by(Pseudonym) %>% 
+#   summarise(dur_mins = sum(overlap)/60) %>%
+#   ungroup() %>%
+#   tidyr::complete(Pseudonym, fill = list(dur_mins = 0)) %>% summarise(m = mean(dur_mins), sd = sd(dur_mins), min = min(dur_mins), max = max(dur_mins))
+
+
+f2_stake <- f2_stake %>%
+  mutate(Pseudonym = factor(Pseudonym)) %>% 
+  filter(overlap > 0) %>%
+  mutate(
+    Code = if_else(grepl("B6.|None", stake), "F2A",
+                   if_else(!grepl("B6.|None", stake), "F2B", Code))
+  )
+
+# restorative food and drink activity
+tmp1 <- aggregate_obs(
+  data = f2_stake %>% filter(Code == "F2A"),
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("Label"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "overlap"
+) %>%
+  filter(!is.na(Label)) %>%
+  mutate(Label = "F2A. Restorative food and drink activity")
+
+# non-restorative food and drink activity
+tmp2 <- aggregate_obs(
+  data = f2_stake %>% filter(Code == "F2B"),
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("Label"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "overlap"
+) %>%
+  filter(!is.na(Label)) %>%
+  mutate(Label = "F2B. Non-restorative food and drink activity")
+
+# Filter F1 tasks
+f1_tasks <- left_join(orig_obs %>% select(Obs_Id, Observer),
+                      df_indiv) %>%
+  filter(grepl("F1", Label))
+
+# f1_tasks %>% 
+#   group_by(Pseudonym) %>% 
+#   summarise(dur_mins = sum(time_dur_s)/60) %>% summarise(m = mean(dur_mins), sd = sd(dur_mins), min = min(dur_mins), max = max(dur_mins))
+
+nonwork <- bind_rows(f2_stake, f1_tasks) %>%
+  mutate(
+    stake = if_else(is.na(stake), "None", stake),
+    overlap = if_else(is.na(overlap), time_dur_s, overlap),
+    rest_type = if_else(grepl("None|B6", stake), "Restorative non-work activity", "Non-restorative non-work activity")) %>%
+  arrange(Pseudonym, time_start) %>%
+  mutate(Pseudonym = factor(Pseudonym))
+
+# restorative vs. non-restorative rest
+tmp3 <- aggregate_obs(
+  data = nonwork,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("rest_type"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "overlap"
+) %>%
+  filter(!is.na(rest_type)) %>%
+  mutate(Label = rest_type)
+
+# non-work activity
+tmp4 <- aggregate_obs(
+  data = df_indiv,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("nonwork"),
+  factor_levels = c("Whole sample", "Primary", "Secondary")
+) %>%
+  filter(!is.na(nonwork)) %>%
+  mutate(Label = nonwork)
+
+
+
+# combine all rest data
+rest <- bind_rows(tmp1,
+                  tmp2) %>%
+  bind_rows(., tmp3) %>%
+  bind_rows(., tmp4) %>%
+  mutate(activity = if_else(is.na(Label), rest_type, Label)) %>%
+  relocate(activity) %>%
+  select(-Label, -rest_type) %>%
+  filter(activity != "Non-restorative non-work activity")
+
+```
+
+
+### **Table**
+### *Descriptive statistics on the duration of individual activities*
+
+```{r, results='asis'}
+# individual activities
+data_agg <- aggregate_obs(
+  data = df_indiv,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("activity"),
+  factor_levels = c("Whole sample", "Primary", "Secondary")
+) %>%
+  filter(!is.na(activity)) %>%
+  bind_rows(
+    # restorative and non-restorative food and drink
+    aggregate_obs(
+      # food and drink
+      data = df_wide,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("f2"),
+      obs_id_var = "id_act_f2",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s"
+    ) %>%
+      rename(activity = f2) %>%
+      filter(!is.na(activity))
+  ) %>%
+  bind_rows(
+    # restorative non-work
+    aggregate_obs(
+      data = df_wide,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("nonwork"),
+      obs_id_var = "id_act_nonwork",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s"
+    ) %>%
+      rename(activity = nonwork) %>%
+      filter(!is.na(activity))
+  ) %>%
+  bind_rows(
+    # Totals
+    aggregate_obs(
+      data = df_indiv,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("Dim_Label"),
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s"
+    ) %>%
+      rename(activity = Dim_Label) %>%
+      filter(!is.na(activity))#%>%filter(grepl("F", dim_act))
+  )
+
+# duration
+dat <- data_agg[, grepl("Phase|activity|_mins", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_mins", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = activity, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("activity", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  mutate(activity = "Individual work related to pupil learning and pastoral duties") %>%
+  bind_rows(., dat %>% filter(grepl("^D[0-9]", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^D. ", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Other individual tasks")) %>%
+  bind_rows(., dat %>% filter(grepl("^E[0-9]", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^E. ", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Non-work activity")) %>%
+  bind_rows(., dat %>% filter(grepl("^F[0-9]", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^Rest", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^Non", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^F. ", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Motion")) %>%
+  bind_rows(., dat %>% filter(grepl("^G[0-9]", activity)))
+
+
+# export
+names(out) <- c("Individual activity", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_indiv_dur.csv", row.names = F)
+
+# print
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+```
+
+
+```{r, results='asis', eval =F}
+# stakeholder interactions
+act <- aggregate_obs(
+  data = df_indiv,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("activity"),
+  factor_levels = c("Whole sample", "Primary", "Secondary")
+) %>%
+  filter(!is.na(activity))
+names(act)[names(act) == "activity"] <- "activity"
+
+# combine with rest data
+act <- bind_rows(act, rest)
+
+# duration
+dat <- act[, grepl("Phase|activity|_mins", names(act))]
+names(dat)[c(-1, -2)] <- gsub("_mins", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = activity, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("activity", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  mutate(activity = "Individual work related to pupil learning and pastoral duties") %>%
+  bind_rows(., dat %>% filter(grepl("^D[0-9]", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Other individual tasks")) %>%
+  bind_rows(., dat %>% filter(grepl("^E[0-9]", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Non-work activity")) %>%
+  bind_rows(., dat %>% filter(grepl("^F[0-9]", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^Rest", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^Non", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Motion")) %>%
+  bind_rows(., dat %>% filter(grepl("^G[0-9]", activity)))
+
+
+# export
+names(out) <- c("Individual activity", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_indiv_dur.csv", row.names = F)
+
+# print
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+```
+
+### **Table**
+### *Descriptive statistics on the frequency of individual activities*
+
+```{r, results='asis'}
+# frequency
+dat <- data_agg[, grepl("Phase|activity|_count", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_count", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = activity, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("activity", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  mutate(activity = "Individual work related to pupil learning and pastoral duties") %>%
+  bind_rows(., dat %>% filter(grepl("^D[0-9]", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^D. ", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Other individual tasks")) %>%
+  bind_rows(., dat %>% filter(grepl("^E[0-9]", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^E. ", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Non-work activity")) %>%
+  bind_rows(., dat %>% filter(grepl("^F[0-9]", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^Rest", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^Non", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^F. ", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Motion")) %>%
+  bind_rows(., dat %>% filter(grepl("^G[0-9]", activity)))
+
+
+# export
+names(out) <- c("Individual activity", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_indiv_freq.csv", row.names = F)
+
+# print
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+```
+
+
+```{r, results='asis', eval=F}
+# frequency
+dat <- act[, grepl("Phase|activity|_count", names(act))]
+names(dat)[c(-1, -2)] <- gsub("_count", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = activity, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("activity", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  mutate(activity = "Individual work related to pupil learning and pastoral duties") %>%
+  bind_rows(., dat %>% filter(grepl("^D[0-9]", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Other individual tasks")) %>%
+  bind_rows(., dat %>% filter(grepl("^E[0-9]", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Non-work activity")) %>%
+  bind_rows(., dat %>% filter(grepl("^F[0-9]", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^Rest", activity))) %>%
+  bind_rows(., dat %>% filter(grepl("^Non", activity))) %>%
+  bind_rows(., tmp %>% mutate(activity = "Motion")) %>%
+  bind_rows(., dat %>% filter(grepl("^G[0-9]", activity)))
+
+# export
+names(out) <- c("Individual activity", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_indiv_freq.csv", row.names = F)
+
+# print
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+```
+
+
+# Location
+
+### **Figure**
+### *Breakdown of teacher-aggregated total minutes spent at various locations*
+
+
+```{r, results='asis'}
+# locations
+data_agg <- aggregate_obs(
+  data = df_loco,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("Label", "Code"),
+  factor_levels = c("Whole sample", "Primary", "Secondary")
+) %>%
+  filter(Label != "None")
+
+data_agg$Label <- factor(data_agg$Label, levels = lvl_loc)
+data_agg$Code <- paste0(data_agg$Code, ".")
+
+
+ts <- ggplot(data = data_agg[grepl("^TS", data_agg$Code), ], aes(x = Code, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 400)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Teaching and supervision spaces")
+
+sw <- ggplot(data = data_agg[grepl("^SW", data_agg$Code), ], aes(x = Code, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 400)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Staff work and support spaces")
+
+sa <- ggplot(data = data_agg[grepl("^SA", data_agg$Code), ], aes(x = Code, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 15)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Staff administration spaces")
+
+sc <- ggplot(data = data_agg[grepl("^SC", data_agg$Code), ], aes(x = Code, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 15)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Shared communal spaces")
+
+
+
+ggpubr::ggarrange(ggpubr::ggarrange(ts + theme(legend.position = "none"), 
+                                    sw + theme(legend.position = "none"), 
+                                    ncol = 2, widths = c(1.2, 1),
+                                    labels = c("A", "B"),
+                                    font.label = list(size = 14), 
+                                    vjust = 1),
+                  ggpubr::ggarrange(sa + theme(legend.position = "none"), 
+                                    sc + theme(legend.position = "none"), 
+                                    ncol = 2, widths = c(1, 1.3),
+                                    labels = c("C", "D"),
+                                    font.label = list(size = 14), 
+                                    vjust = 1, 
+                                    common.legend = T, legend = "bottom"), 
+                  nrow = 2) 
+cat("\n\n")
+cat("*Note.* For each teacher, total minutes spent at various locations were summed. This includes teaching and supervision spaces (A), staff work and support spaces (B), staff administration spaces (C) and shared communal spaces (D). Summary statistics were then calculated across teachers. Bars represent M whereas error bars represent SE.\n\n")
+
+```
+
+
+### **Table**
+### *Descriptive statistics on the time spent in various locations*
+
+```{r, results='asis'}
+# # locations
+# loc <- aggregate_obs(
+#   data = df_loco,
+#   primary_group_vars = c("Phase"),
+#   secondary_group_vars = c("Label"),
+#   factor_levels = c("Whole sample", "Primary", "Secondary")
+# )  %>%
+#   filter(Label != "None") %>%
+#   mutate(Label = factor(Label, levels = lvl_loc)) %>%
+#   arrange(Phase, Label)
+# 
+# 
+# duration
+dat <- data_agg[, grepl("Phase|Label|_mins", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_mins", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = Label, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("Label", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  mutate(Label = "Teaching and supervision spaces") %>%
+  bind_rows(., dat %>% filter(grepl("^TS", Label))) %>%
+  bind_rows(., tmp %>% mutate(Label = "Staff work and support spaces")) %>%
+  bind_rows(., dat %>% filter(grepl("^SW[0-9]", Label))) %>%
+  bind_rows(., tmp %>% mutate(Label = "Staff administration spaces")) %>%
+  bind_rows(., dat %>% filter(grepl("^SA[0-9]", Label))) %>%
+  bind_rows(., tmp %>% mutate(Label = "Shared communal spaces")) %>%
+  bind_rows(., dat %>% filter(grepl("^SC[0-9]", Label)))
+
+# export
+names(out) <- c("Label", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_loco_dur.csv", row.names = F)
+
+# print
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+```
+
+### **Table**
+### *Descriptive statistics on the frequency of being at various locations*
+
+```{r, results='asis'}
+# frequency
+dat <- data_agg[, grepl("Phase|Label|_count", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_count", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = Label, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("Label", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  mutate(Label = "Teaching and supervision spaces") %>%
+  bind_rows(., dat %>% filter(grepl("^TS", Label))) %>%
+  bind_rows(., tmp %>% mutate(Label = "Staff work and support spaces")) %>%
+  bind_rows(., dat %>% filter(grepl("^SW[0-9]", Label))) %>%
+  bind_rows(., tmp %>% mutate(Label = "Staff administration spaces")) %>%
+  bind_rows(., dat %>% filter(grepl("^SA[0-9]", Label))) %>%
+  bind_rows(., tmp %>% mutate(Label = "Shared communal spaces")) %>%
+  bind_rows(., dat %>% filter(grepl("^SC[0-9]", Label)))
+
+# export
+names(out) <- c("Label", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_loco_freq.csv", row.names = F)
+
+# print
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+```
+
+
+
+
+# Multitasking
+
+```{r, results='asis'}
+# aggregate
+data_agg <- aggregate_obs(
+  data = df_wide,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("multi"),
+  obs_id_var = "id_multi", # does not work correctly for count of "no task"
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s"
+)  %>%
+  bind_rows(
+    aggregate_obs(
+      data = df_wide,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("task_inter"),
+      obs_id_var = "id_stake",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s"
+    )  %>%
+      rename(multi = task_inter) %>%
+      filter(!is.na(multi))
+  ) %>%
+  bind_rows(
+    aggregate_obs(
+      data = df_wide,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("task_indiv"),
+      obs_id_var = "id_act",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s"
+    )  %>%
+      rename(multi = task_indiv) %>%
+      filter(!is.na(multi))
+  )
+
+# duration
+dat <- data_agg[, grepl("Phase|multi|_mins", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_mins", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = multi, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("multi", "Whole sample", "Primary", "Secondary")]
+
+# export
+names(dat) <- c("", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(dat, "desc_multi.csv", row.names = F)
+
+# print
+dat %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+```
+
+
+```{r, eval = F}
+tmp_int <- df_inter %>%
+  ungroup() %>%
+  select(Observer, Pseudonym, Label, Code, time_start, time_end, time_dur_s, Id)
+names(tmp_int) <- c("Observer", "pseudo_stake", "stake", "code_stake", "time_start_stake", "time_end_stake", "dur_stake", "Id_stake")
+
+
+tmp_ind <- df_indiv %>%
+  ungroup() %>%
+  select(Observer, Pseudonym, Label, Code, time_start, time_end, time_dur_s, Id)
+names(tmp_ind) <- c("Observer", "pseudo_act", "act", "code_act", "time_start_act", "time_end_act", "dur_act", "Id_act")
+
+# combine stakeholder interaction and individual activity data
+multi <- fuzzyjoin::interval_full_join(
+  x = tmp_int %>% filter(Observer == "Ryan Yung"),
+  y = tmp_ind %>% filter(Observer == "Ryan Yung"),
+  by = c("time_start_stake" = "time_start_act", "time_end_stake" = "time_end_act")) %>%
+  ungroup() %>%
+  bind_rows(.,
+            fuzzyjoin::interval_full_join(
+              x = tmp_int %>% filter(Observer == "Rebecca Curtis"),
+              y = tmp_ind %>% filter(Observer == "Rebecca Curtis"),
+              by = c("time_start_stake" = "time_start_act", "time_end_stake" = "time_end_act")) %>%
+              ungroup()) %>% 
+  mutate(
+    # compute overlap
+    overlap = compute_overlap(start1 = time_start_stake, end1 = time_end_stake, start2 = time_start_act, end2 = time_end_act),
+    # overlap no NAs 
+    overlap_comp = if_else(is.na(overlap) & is.na(act), dur_stake,
+                           if_else(is.na(overlap) & is.na(stake), dur_act,
+                                   overlap)),
+    # overlap using interaction durations for all cases where there is no overlap
+    overlap_comp = if_else(is.na(overlap) & is.na(act), dur_stake,
+                           if_else(is.na(overlap) & is.na(stake), dur_act,
+                                   overlap)),
+    # fill in the blanks
+    Observer.x = if_else(is.na(Observer.x), Observer.y, Observer.x),
+    Observer.y = if_else(is.na(Observer.y), Observer.x, Observer.y),
+    pseudo_act = if_else(is.na(pseudo_act), pseudo_stake, pseudo_act),
+    pseudo_stake = if_else(is.na(pseudo_stake), pseudo_act, pseudo_stake),
+    act = if_else(is.na(act), "None", act),
+    stake = if_else(is.na(stake), "None", stake),
+    # create variable that specifies if any record is available
+    no_record = stake == "None" & act == "None",
+    # harmonise ID vars
+    Observer = Observer.x,
+    Pseudonym = pseudo_stake,
+    Phase = if_else(grepl("PST", Pseudonym), "Primary", "Secondary")
+  ) %>%
+  select(-Observer.x, -Observer.y, -pseudo_act, -pseudo_stake) %>%
+  mutate(
+    indiv_bin = if_else(act == "None", 0, 1),
+    inter_bin = if_else(stake == "None", 0, 1),
+    # create variable representing multi-tasking
+    multi = if_else(indiv_bin == 0 & inter_bin == 1, "Interaction single-task",
+                    if_else(indiv_bin == 1 & inter_bin == 0, "Individual single-task",
+                            if_else(indiv_bin == 1 & inter_bin == 1, "Multi-task",
+                                    if_else(indiv_bin == 0 & inter_bin == 0, "No task", 
+                                            NA))))
+  )
+
+
+multi <- multi %>%
+  group_by(Id_stake) %>%
+  mutate(
+    n_stake = n(),
+    # compute total overlap
+    tot_ovlp_stake = sum(overlap, na.rm = T),
+    # compare against recorded duration: positive numbers mean that not the whole task is covered
+    diff_stake = dur_stake - tot_ovlp_stake,
+    check_stake = diff_stake == 0
+  ) %>%
+  ungroup() %>%
+  group_by(Id_act) %>%
+  mutate(
+    n_act = n(),
+    # compute total overlap
+    tot_ovlp_act = sum(overlap, na.rm = T),
+    # compare against recorded duration: positive numbers mean that not the whole task is covered
+    diff_act = dur_act - tot_ovlp_act,
+    check_act = diff_act == 0
+  ) %>%
+  ungroup()
+
+multi %>% 
+  group_by(n_act, multi) %>%
+  summarise(n = n())
+
+# These are pure individual single-tasks that were conducted entirely without a concurrent interaction
+multi %>%
+  filter(n_act == 1) %>% # merger resulted in one row only
+  filter(multi == "Individual single-task") %>% # and the only overlap found is with "none"
+  # then dur_act and overlap should be equal
+  mutate(check = overlap_comp == dur_act) %>%
+  filter(check == F)
+
+multi %>%
+  group_by(multi, check_act) %>%
+  summarise(n = n())
+
+
+
+multi %>% 
+  group_by(n_stake, multi) %>%
+  summarise(n = n())
+
+# These are pure interaction single-tasks that were conducted entirely without a concurrent individual task
+multi %>%
+  filter(n_stake == 1) %>% # merger resulted in one row only
+  filter(multi == "Interaction single-task") %>% # and the only overlap found is with "none"
+  # then dur_stake and overlap should be equal
+  mutate(check = overlap_comp == dur_stake) %>%
+  filter(check == F) 
+
+
+# deal with cases were overlap is zero
+multi %>% 
+  filter(overlap == 0) %>%
+  group_by(multi, n_act) %>%
+  summarise(n = n())
+
+multi <- multi %>%
+  mutate(
+    
+    time_measure = 
+      if_else(overlap == 0 & multi == "Interaction single-task", dur_stake,
+              if_else(overlap == 0 & multi == "Individual single-task", dur_act,
+                      overlap_comp))
+    
+  )
+
+# aggregate
+dat <- aggregate_obs(
+  data = multi,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("multi"),
+  # factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "overlap"
+)  %>%  
+  arrange(Phase)
+
+
+# aggregate over "no records"
+aggregate_obs(
+  data = multi,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("no_record"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "overlap"
+)  %>%
+  arrange(Phase) %>%
+  select(Phase, no_record, contains("_mins")) %>%
+  kable(caption = "Total minutes for which there were records vs. not") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# check teacher-level data
+multi %>%
+  group_by(Observer, Pseudonym, no_record) %>%
+  summarise(dur_mins = sum(overlap, na.rm = T)/60) %>%
+  ungroup() %>%
+  filter(no_record == T) %>%
+  arrange(Pseudonym) %>%
+  tidyr::complete(Pseudonym, fill = list(dur_mins = 0)) %>% 
+  kable(caption = "Total minutes per teacher where neither an interaction nor an individual task was recorded") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+
+
+
+
+
+```
+
+
+# Task-switching
+
+```{r, results = 'asis'}
+# create df for this analysis
+df_tmp <- df_long %>%
+  filter(Dimension != "Location") %>%
+  group_by(Pseudonym) %>%
+  arrange(time_start) %>%
+  # combine variable levels for individual and stakeholder tasks
+  mutate(task = Label) %>%
+  filter(task != "None") %>%
+  # Identify task-switches
+  mutate(
+    prev_task = lag(task),
+    next_task = lead(task),
+    time_end_prev = lag(time_end),
+    time_start_next = lead(time_start)
+  ) %>%
+  # Calculate the time gaps
+  mutate(
+    gap_A_to_B_secs = as.numeric(difftime(time_start, time_end_prev, units = "secs")),
+    gap_B_to_A_secs = as.numeric(difftime(time_start_next, time_end, units = "secs"))
+  ) %>%
+  ungroup() %>%
+  as.data.frame()
+
+# A task-switch is when:
+# prev_task == next_task AND task_description != prev_task (i.e., switched away and back)
+df_tmp <- df_tmp %>%
+  filter(
+    !is.na(prev_task) & !is.na(next_task),
+    prev_task == next_task, # A ... B ... A
+    task != prev_task # B ≠ A
+  ) %>%
+  filter( # teacher stopping Task A, moving to Task B, and then returning directly to Task A, with less than a one-minute gap between each task
+    gap_A_to_B_secs <= 60 & gap_B_to_A_secs <= 60
+  ) %>%
+  filter(
+    time_dur_s < 60*10
+  ) %>%
+  mutate(task_swith = T)
+
+# teacher-level aggregates
+tmp <- aggregate_obs(
+  data = df_tmp,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("task_swith"),
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  return_teacher_level = T,
+  id_vars = c("Pseudonym", "day_dur_h")
+) %>%
+  rename(per_day = count) %>%
+  mutate(per_hour = per_day / day_dur_h)
+
+# sample level aggregates
+data_agg <- bind_rows(
+  # aggregate by phase
+  tmp %>%
+  group_by(Phase, .drop = FALSE) %>%
+  summarise(
+    across(
+      .cols = c(per_day, per_hour),
+      .fns = list(
+        mean = ~mean(.x, na.rm = TRUE),
+        sd = ~sd(.x, na.rm = TRUE),
+        min = ~min(.x, na.rm = TRUE),
+        max = ~max(.x, na.rm = TRUE),
+        SE = ~sd(.x, na.rm = TRUE) / sqrt(sum(!is.na(.x)))
+      ),
+      .names = "{.fn}_{.col}"
+    ),
+    .groups = "drop"
+  )
+  ,
+  # aggregate across all
+  tmp %>%
+  summarise(
+    across(
+      .cols = c(per_day, per_hour),
+      .fns = list(
+        mean = ~mean(.x, na.rm = TRUE),
+        sd = ~sd(.x, na.rm = TRUE),
+        min = ~min(.x, na.rm = TRUE),
+        max = ~max(.x, na.rm = TRUE),
+        SE = ~sd(.x, na.rm = TRUE) / sqrt(sum(!is.na(.x)))
+      ),
+      .names = "{.fn}_{.col}"
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(Phase = "Whole sample")
+) %>%
+  mutate(Phase = factor(Phase, levels = c("Whole sample", "Primary", "Secondary"))) %>%
+  relocate(Phase) %>%
+  arrange(Phase)
+
+# print to markdown
+data_agg %>%
+  kable(caption = "Count of interruptions per day and per hour", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+# compute average timing of the 'in-between' tasks
+df_tmp %>% 
+  summarise(
+    mean_mins = mean(time_dur_s, na.rm = T)/60,
+    sd_mins = sd(time_dur_s, na.rm = T)/60,
+    min_mins = min(time_dur_s, na.rm = T)/60,
+    max_mins = max(time_dur_s, na.rm = T)/60,
+  ) %>%
+  kable(caption = "Duration of between tasks", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  print()
+
+```
+
+
+
+# Appendix
+
+## Time and location of work-related conversations
+
+```{r, results='asis'}
+# create df for this analysis
+df_tmp <- df_wide %>% 
+  # work conversations 
+  filter(code_stake == "B4") %>% 
+  group_by(id_stake) %>% 
+  mutate(
+    # check if it fits into the pupil hour categories
+    count_time = length(unique(pupil_hours)),
+    # check if it took place at more than one location
+    count_loc = length(unique(loc, na.rm = T)),
+  ) %>%
+  ungroup() %>%
+  # only use the ones that fit into one time categoty
+  filter(count_time == 1) %>%
+  # update location
+  mutate(loc2 = if_else(count_loc == 1, loc, "TS6. More than one location"))
+
+# check count of work conversations
+# df_wide %>% filter(code_stake == "B4") %>% summarise(n = length(unique(id_stake)))
+# check count after removal
+# df_tmp %>% summarise(n = length(unique(id_stake)))
+
+# aggregate data based on timing #
+data_agg <- aggregate_obs(
+  data = df_tmp,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("pupil_hours"),
+  obs_id_var = "id_stake",
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s"
+) 
+
+# create plot
+ggplot(data = data_agg, aes(x = pupil_hours, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  coord_cartesian(ylim = c(0, 25)) +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  ylab("Minutes spent") +
+  xlab("Timing of work conversations")  +
+  labs(fill = "Teacher group")
+cat("\n\n")
+cat("*Note.* For each teacher, total minutes spent engaging in work-related conversations with colleagues were summed. Summary statistics were then calculated across teachers. Bars represent M whereas error bars represent SE.\n\n")
+
+# duration
+dat <- data_agg[, grepl("Phase|pupil|_mins", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_mins", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = pupil_hours, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("pupil_hours", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  mutate(pupil_hours = "Duration") %>%
+  bind_rows(., dat)
+
+# frequency
+dat <- data_agg[, grepl("Phase|pupil|_count", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_count", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = pupil_hours, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("pupil_hours", "Whole sample", "Primary", "Secondary")]
+
+
+out <- out %>% 
+  bind_rows(., tmp %>%
+              mutate(pupil_hours = "Frequency")) %>%
+  bind_rows(., dat)
+
+# export
+names(out) <- c("Timing", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_B4_time.csv", row.names = F)
+
+# print to markdown
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+# aggregate data based on location #
+data_agg <- aggregate_obs(
+  data = df_tmp,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("loc2"),
+  obs_id_var = "id_stake",
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s"
+) %>%
+  mutate(
+    Code = stringr::str_sub(loc2, 1, 4),
+    loc2 = factor(loc2, levels = c(lvl_loc, "TS6. More than one location"))
+  )
+
+
+# create plot
+ts <- ggplot(data = data_agg[grepl("^TS", data_agg$Code), ], aes(x = Code, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 20)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Teaching and supervision spaces")
+
+sw <- ggplot(data = data_agg[grepl("^SW", data_agg$Code), ], aes(x = Code, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 20)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Staff work and support spaces")
+
+sa <- ggplot(data = data_agg[grepl("^SA", data_agg$Code), ], aes(x = Code, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 5)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Staff administration spaces")
+
+sc <- ggplot(data = data_agg[grepl("^SC", data_agg$Code), ], aes(x = Code, y = mean_mins, fill = Phase)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean_mins - SE_mins, ymax = mean_mins + SE_mins), width = 0.1, position = position_dodge(0.9)
+  ) +
+  coord_cartesian(ylim = c(0, 5)) +
+  ambition_theme +
+  scale_fill_manual(values = c(navy, blue, red)) +
+  labs(fill = "Teacher group") +
+  theme(plot.margin = margin(1, 2, 2, 2)) +
+  theme(axis.title = element_text(face = "plain")) +
+  ylab("Minutes spent") +
+  xlab("Shared communal spaces")
+
+
+
+ggpubr::ggarrange(ggpubr::ggarrange(ts + theme(legend.position = "none"), 
+                                    sw + theme(legend.position = "none"), 
+                                    ncol = 2, widths = c(1.2, 1),
+                                    labels = c("A", "B"),
+                                    font.label = list(size = 14), 
+                                    vjust = 1),
+                  ggpubr::ggarrange(sa + theme(legend.position = "none"), 
+                                    sc + theme(legend.position = "none"), 
+                                    ncol = 2, widths = c(1, 1.3),
+                                    labels = c("C", "D"),
+                                    font.label = list(size = 14), 
+                                    vjust = 1, 
+                                    common.legend = T, legend = "bottom"), 
+                  nrow = 2) 
+cat("\n\n")
+cat("*Note.* For each teacher, total minutes conversing with colleagues at various locations were summed. This includes teaching and learning spaces (A), pastoral and administrative spaces (B), staff and meeting spaces (C) and shared and communal areas (D). Summary statistics were then calculated across teachers. Bars represent M whereas error bars represent SE.\n\n")
+
+# duration
+dat <- data_agg[, grepl("Phase|loc|_mins", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_mins", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = loc2, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("loc2", "Whole sample", "Primary", "Secondary")]
+
+tmp <- dat[1, ]
+tmp[, 1:4] <- NA
+
+out <- tmp %>% 
+  mutate(loc2 = "Duration") %>%
+  bind_rows(., dat)
+
+# frequency
+dat <- data_agg[, grepl("Phase|loc|_count", names(data_agg))]
+names(dat)[c(-1, -2)] <- gsub("_count", "", names(dat)[c(-1, -2)] )
+dat$desc <- paste0(round(dat$mean, 2), " (", round(dat$sd, 2), ") [", round(dat$min, 2), "; ", round(dat$max, 2), "]")
+
+dat <- tidyr::pivot_wider(dat, 
+                          id_cols = loc2, 
+                          names_from = Phase, 
+                          values_from = desc,
+                          names_glue = "{Phase}")
+
+dat <- dat[, c("loc2", "Whole sample", "Primary", "Secondary")]
+
+
+out <- out %>% 
+  bind_rows(., tmp %>%
+              mutate(loc2 = "Frequency")) %>%
+  bind_rows(., dat)
+
+# export
+names(out) <- c("Location", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_B4_loc.csv", row.names = F)
+
+# print to markdown
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+```
+
+
+## Estimated vs. observed time
+
+```{r, results='asis'}
+# aggregate observed individual tasks #
+data_agg <- aggregate_obs(
+  data = df_wide,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("stake", "code_stake"),
+  obs_id_var = "id_stake",
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s"
+) %>%
+  rename(
+    observation = stake,
+    Code = code_stake
+  ) %>%
+  filter(observation != "None") %>%
+  # aggregate observed stakeholder interactions #
+  bind_rows(
+    # individual activities: all but food and drink
+    data_agg <- aggregate_obs(
+      data = df_wide %>% filter(code_act != "F2"),
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("act", "code_act"),
+      obs_id_var = "id_act",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s"
+    ) %>%
+  rename(
+    observation = act,
+    Code = code_act
+  ) %>%
+  filter(observation != "None")
+  ) %>%
+  bind_rows(
+    # restorative and non-restorative food and drink
+    aggregate_obs(
+      data = df_wide,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("f2", "code_f2"),
+      obs_id_var = "id_act_f2",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s"
+    ) %>%
+  rename(
+    observation = f2,
+    Code = code_f2
+  ) %>%
+  filter(observation != "None")
+  ) %>%
+  # combine with survey lookup
+  left_join(lookup_survey_task_map, by = "Code") %>%
+  filter(!is.na(survey_item))
+
+#### ------------ ####
+# aggregate observed individual tasks #
+teach_agg_obs <- aggregate_obs(
+  data = df_wide,
+  primary_group_vars = c("Phase"),
+  secondary_group_vars = c("stake", "code_stake"),
+  obs_id_var = "id_stake",
+  factor_levels = c("Whole sample", "Primary", "Secondary"),
+  duration_var = "time_dur_s",
+  return_teacher_level = T
+) %>%
+  rename(
+    observation = stake,
+    Code = code_stake
+  ) %>%
+  filter(observation != "None") %>%
+  # aggregate observed stakeholder interactions #
+  bind_rows(
+    # individual activities: all but food and drink
+    data_agg <- aggregate_obs(
+      data = df_wide %>% filter(code_act != "F2"),
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("act", "code_act"),
+      obs_id_var = "id_act",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s",
+      return_teacher_level = T
+    ) %>%
+  rename(
+    observation = act,
+    Code = code_act
+  ) %>%
+  filter(observation != "None")
+  ) %>%
+  bind_rows(
+    # restorative and non-restorative food and drink
+    aggregate_obs(
+      data = df_wide,
+      primary_group_vars = c("Phase"),
+      secondary_group_vars = c("f2", "code_f2"),
+      obs_id_var = "id_act_f2",
+      factor_levels = c("Whole sample", "Primary", "Secondary"),
+      duration_var = "time_dur_s",
+      return_teacher_level = T
+    ) %>%
+  rename(
+    observation = f2,
+    Code = code_f2
+  ) %>%
+  filter(observation != "None")
+  ) %>%
+  # aggregate by survey item
+  left_join(lookup_survey_task_map) %>%
+  filter(!is.na(survey_item)) %>%
+  group_by(Pseudonym, Phase, survey_item) %>%
+  summarise(
+    Observed = sum(dur)
+  ) %>%
+  ungroup() %>%
+  tidyr::complete(tidyr::nesting(Phase, Pseudonym), survey_item, fill = list(Observed = 0))
+
+
+# survey data
+teach_agg_est <- df_survey %>%
+  select(Pseudonym, School_code, Phase, all_of(time_cols)) %>%
+  tidyr::pivot_longer(
+    cols = time_cols,
+    names_to = "survey_item",
+    values_to = "Estimated"
+  ) %>%
+    left_join(lookup_survey_task_map)
+
+teach_agg <- 
+  # combine data
+  full_join(teach_agg_est, teach_agg_obs) %>%
+  mutate(
+    # compute difference
+    Difference = Estimated - Observed,
+    # fix names
+    survey_item = gsub("_time", "", survey_item)) %>%
+  # convert to long format to plot individual data
+  tidyr::pivot_longer(
+    cols = c("Observed", "Estimated", "Difference"),
+    names_to = "Measure",
+    values_to = "total_min"
+  ) 
+
+# compute sample aggregates
+data_agg <- teach_agg %>% 
+  group_by(Phase, survey_item, Survey_code, Measure) %>%
+  summarise(
+    mean = mean(total_min),
+    sd = sd(total_min),
+    min = min(total_min),
+    max = max(total_min),
+    SE = sd(total_min) / sqrt(n())
+  ) %>%
+  bind_rows(., 
+            teach_agg %>% 
+              group_by(survey_item, Survey_code, Measure) %>%
+              summarise(
+                Phase = "Whole sample",
+                mean = mean(total_min),
+                sd = sd(total_min),
+                min = min(total_min),
+                max = max(total_min),
+                SE = sd(total_min) / sqrt(n())
+              )
+  ) %>%
+  ungroup() %>%
+  mutate(
+    Phase = factor(Phase, levels = c("Whole sample", "Primary", "Secondary")),
+    Survey_code = paste0(Survey_code, "."),
+    Survey_code = factor(Survey_code, levels = c(paste0("S", 1:11, ".")))
+  )
+
+# plot sample average data
+ggplot(data = data_agg[data_agg$Measure != "Difference", ], aes(x = Survey_code, y = mean, fill = Measure)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(
+    aes(ymin = mean - SE, ymax = mean + SE), width = 0.1, position = position_dodge(0.9)
+  ) +
+  ambition_theme +
+  facet_wrap(vars(Phase), ncol = 1) +
+  scale_fill_manual(values = c(coral, teal))  + 
+  xlab("Task") +
+  ylab("Minutes spent")
+
+
+# duration
+dat <- data_agg %>%
+  arrange(Phase, Survey_code) %>%
+  mutate(
+    Task = paste(Survey_code, stringr::str_to_sentence(gsub("_", "/", survey_item))),
+    desc = paste0(round(mean, 2), " (", round(sd, 2), ") [", round(min, 2), "; ", round(max, 2), "]") 
+  ) %>%
+  relocate(Task) %>%
+  tidyr::pivot_wider(., 
+                     id_cols = c(Task, Measure, Survey_code), 
+                     names_from = Phase, 
+                     values_from = desc,
+                     names_glue = "{Phase}") %>%
+  mutate(Measure = factor(Measure, levels = c("Estimated", "Observed", "Difference"))) %>%
+  arrange(Survey_code, Measure) %>%
+  select(-Survey_code)
+
+# format output
+tmp <- dat[1, ]
+tmp[, 1:5] <- NA
+
+out <- tmp %>% 
+  mutate(Measure = "S1. Teaching  [~ A1, A2, A3, A5 and A6]") %>%
+  bind_rows(., dat %>% filter(Task == "S1. Teaching")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S2. Managing pupil behaviour [~ A7]")) %>%
+  bind_rows(., dat %>% filter(Task == "S2. Behaviour")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S3. Managing pupil transitions [~ A4]")) %>%
+  bind_rows(., dat %>% filter(Task == "S3. Transitions")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S4. Assessment [~ D3]")) %>%
+  bind_rows(., dat %>% filter(Task == "S4. Assessment")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S5. Marking [~ D2]")) %>%
+  bind_rows(., dat %>% filter(Task == "S5. Marking")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S6. Pastoral support [~ A8 and A9]")) %>%
+  bind_rows(., dat %>% filter(Task == "S6. Pastoral")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S7. Planning lessons/managing resources [~ D1]")) %>%
+  bind_rows(., dat %>% filter(Task == "S7. Planning/resources")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S8. Administrative tasks [~ A12, D4 and D5]")) %>%
+  bind_rows(., dat %>% filter(Task == "S8. Admin")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S9. Engaging with colleagues [~ B1, B2, B3, B4, B5 and B6]")) %>%
+  bind_rows(., dat %>% filter(Task == "S9. Colleagues")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S10. Rest [~ F1 and F2A]")) %>%
+  bind_rows(., dat %>% filter(Task == "S10. Rest")) %>%
+  bind_rows(., tmp %>% mutate(Measure = "S11. Travelling around premises [~ G1]")) %>%
+  bind_rows(., dat %>% filter(Task == "S11. Travel")) %>%
+  select(-Task)
+
+# export
+names(out) <- c( "", "Whole sample (N = 18)", "Primary teachers (n = 9)", "Secondary teachers (n = 9)")
+write.csv(out, "desc_est_obs.csv", row.names = F)
+
+# print to markdown
+idx <- which(is.na(out$`Whole sample (N = 18)`))
+
+out %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), fixed_thead = T, full_width = F, position = "left") %>%
+  row_spec(idx, bold = T) %>%
+  print()
+
+```
+
