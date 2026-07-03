@@ -5,6 +5,7 @@ set.seed(123)
 
 # load libraries
 library(dplyr)
+library(stringr)
 
 # create function to source code
 source_code <- function(root_dir_name = "code", target_repo = "helper_functions", branch = "main", file_name = "file.R") {
@@ -48,3 +49,4 @@ source_code <- function(root_dir_name = "code", target_repo = "helper_functions"
   }
 }
 source_code(target_repo = "TimeMotion", file_name = "functions.R", branch = "master")
+green <- "#C1D10F"
